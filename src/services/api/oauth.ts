@@ -68,5 +68,10 @@ export const oauthApi = {
       provider: callbackProvider,
       redirect_url: redirectUrl
     });
-  }
+  },
+
+  importKiroToken: (refreshToken: string) =>
+    apiClient.post<{ status: string; label?: string; email?: string }>('/kiro-import-token', {
+      refresh_token: refreshToken
+    }),
 };

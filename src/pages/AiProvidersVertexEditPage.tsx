@@ -236,6 +236,11 @@ export function AiProvidersVertexEditPage() {
 
     const trimmedBaseUrl = (form.baseUrl ?? '').trim();
     const baseUrl = trimmedBaseUrl || undefined;
+    const prefix = (form.prefix ?? '').trim();
+    if (!prefix) {
+      showNotification(t('notification.prefix_required'), 'error');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -246,7 +251,7 @@ export function AiProvidersVertexEditPage() {
           form.priority !== undefined && Number.isFinite(form.priority)
             ? Math.trunc(form.priority)
             : undefined,
-        prefix: form.prefix?.trim() || undefined,
+        prefix,
         baseUrl,
         proxyUrl: form.proxyUrl?.trim() || undefined,
         headers: buildHeaderObject(form.headers),

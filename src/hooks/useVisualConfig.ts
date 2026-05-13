@@ -662,6 +662,12 @@ function getNextDirtyFields(
   if (Object.prototype.hasOwnProperty.call(patch, 'routingStrategy')) {
     updateDirty('routingStrategy', nextValues.routingStrategy === baselineValues.routingStrategy);
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'routingLoadBalance')) {
+    updateDirty(
+      'routingLoadBalance',
+      nextValues.routingLoadBalance === baselineValues.routingLoadBalance
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, 'routingSessionAffinity')) {
     updateDirty(
       'routingSessionAffinity',
@@ -853,6 +859,9 @@ export function useVisualConfig() {
         quotaAntigravityCredits: Boolean(quotaExceeded?.['antigravity-credits'] ?? false),
 
         routingStrategy: routing?.strategy === 'fill-first' ? 'fill-first' : 'round-robin',
+        routingLoadBalance: routing?.['load-balance'] !== undefined
+          ? Boolean(routing['load-balance'])
+          : routing?.strategy === 'fill-first' ? false : true,
         routingSessionAffinity: Boolean(
           routing?.['session-affinity'] ??
             routing?.sessionAffinity ??
@@ -994,11 +1003,13 @@ export function useVisualConfig() {
         if (
           docHas(doc, ['routing']) ||
           values.routingStrategy !== 'round-robin' ||
+          !values.routingLoadBalance ||
           values.routingSessionAffinity ||
           values.routingSessionAffinityTTL.trim()
         ) {
           ensureMapInDoc(doc, ['routing']);
           doc.setIn(['routing', 'strategy'], values.routingStrategy);
+          setBooleanInDoc(doc, ['routing', 'load-balance'], values.routingLoadBalance);
           setBooleanInDoc(doc, ['routing', 'session-affinity'], values.routingSessionAffinity);
           setStringInDoc(
             doc,

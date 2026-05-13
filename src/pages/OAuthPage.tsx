@@ -36,6 +36,12 @@ interface ProviderState {
   callbackError?: string;
   userCode?: string;
   verificationUri?: string;
+  // kiro import token
+  importMode?: boolean;
+  importToken?: string;
+  importSubmitting?: boolean;
+  importStatus?: 'success' | 'error';
+  importError?: string;
 }
 
 interface VertexImportResult {
@@ -317,6 +323,50 @@ export function OAuthPage() {
     }
   };
 
+  const submitKiroImportToken = async () => {
+    const provider = 'kiro' as const;
+    const refreshToken = (states[provider]?.importToken || '').trim();
+    if (!refreshToken) {
+      showNotification(t('auth_login.kiro_import_token_required', { defaultValue: 'Refresh token is required' }), 'warning');
+      return;
+    }
+    updateProviderState(provider, {
+      importSubmitting: true,
+      importStatus: undefined,
+      importError: undefined,
+      status: undefined,
+      error: undefined,
+    });
+    try {
+      await oauthApi.importKiroToken(refreshToken);
+      updateProviderState(provider, {
+        importSubmitting: false,
+        importStatus: 'success',
+        importError: undefined,
+        importToken: '',
+        status: 'success',
+        error: undefined,
+        url: undefined,
+        state: undefined,
+        polling: false,
+      });
+      showNotification(t('auth_login.kiro_import_token_success', { defaultValue: 'Kiro token imported successfully' }), 'success');
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      updateProviderState(provider, {
+        importSubmitting: false,
+        importStatus: 'error',
+        importError: message || t('auth_login.kiro_import_token_error', { defaultValue: 'Failed to import Kiro token' }),
+        status: 'error',
+        error: message,
+      });
+      showNotification(
+        `${t('auth_login.kiro_import_token_error', { defaultValue: 'Failed to import Kiro token' })}${message ? ` ${message}` : ''}`,
+        'error'
+      );
+    }
+  };
+
   const handleVertexFilePick = () => {
     vertexFileInputRef.current?.click();
   };
@@ -382,11 +432,14 @@ export function OAuthPage() {
       <div className={styles.content}>
         {PROVIDERS.map((provider) => {
           const state = states[provider.id] || {};
-          const canSubmitCallback = CALLBACK_SUPPORTED.includes(provider.id) && Boolean(state.url);
+          const isKiroImportMode = provider.id === 'kiro' && Boolean(state.importMode);
+          const canSubmitCallback = CALLBACK_SUPPORTED.includes(provider.id) && Boolean(state.url) && !isKiroImportMode;
           const loginButtonLabel =
-            state.status === 'success'
-              ? t('auth_login.login_another_account')
-              : t(getAuthKey(provider.id, 'oauth_button'));
+            provider.id === 'kiro' && isKiroImportMode
+              ? t('auth_login.kiro_import_token_button', { defaultValue: 'Import Token' })
+              : state.status === 'success'
+                ? t('auth_login.login_another_account')
+                : t(getAuthKey(provider.id, 'oauth_button'));
           const statusBadgeClassName = [
             'status-badge',
             state.status === 'success' ? 'success' : '',
@@ -408,13 +461,86 @@ export function OAuthPage() {
                   </span>
                 }
                 extra={
-                  <Button onClick={() => startAuth(provider.id)} loading={state.polling}>
-                    {loginButtonLabel}
-                  </Button>
+                  provider.id === 'kiro' && !state.polling ? (
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button
+                        variant={isKiroImportMode ? 'secondary' : 'primary'}
+                        onClick={() => {
+                          if (isKiroImportMode) {
+                            updateProviderState('kiro', { importMode: false, importToken: '', importStatus: undefined, importError: undefined });
+                          } else {
+                            startAuth(provider.id);
+                          }
+                        }}
+                        loading={state.polling}
+                      >
+                        {loginButtonLabel}
+                      </Button>
+                      <Button
+                        variant={isKiroImportMode ? 'primary' : 'secondary'}
+                        onClick={() => updateProviderState('kiro', {
+                          importMode: !isKiroImportMode,
+                          importToken: '',
+                          importStatus: undefined,
+                          importError: undefined,
+                          url: undefined,
+                          state: undefined,
+                          status: undefined,
+                          error: undefined,
+                          polling: false,
+                        })}
+                      >
+                        {isKiroImportMode
+                          ? t('auth_login.kiro_browser_login', { defaultValue: 'Browser Login' })
+                          : t('auth_login.kiro_import_token_tab', { defaultValue: 'Import Token' })}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button onClick={() => startAuth(provider.id)} loading={state.polling}>
+                      {loginButtonLabel}
+                    </Button>
+                  )
                 }
               >
                 <div className={styles.cardContent}>
                   <div className={styles.cardHint}>{t(provider.hintKey)}</div>
+                  {provider.id === 'kiro' && isKiroImportMode && (
+                    <div className={styles.callbackSection}>
+                      <Input
+                        label={t('auth_login.kiro_import_token_label', { defaultValue: 'Refresh Token' })}
+                        hint={t('auth_login.kiro_import_token_hint', { defaultValue: 'Paste the Kiro refresh token directly. It usually starts with aorAAAAAG.' })}
+                        value={state.importToken || ''}
+                        onChange={(e) =>
+                          updateProviderState('kiro', {
+                            importToken: e.target.value,
+                            importStatus: undefined,
+                            importError: undefined,
+                          })
+                        }
+                        placeholder={t('auth_login.kiro_import_token_placeholder', { defaultValue: 'aorAAAAAG...' })}
+                      />
+                      <div className={styles.callbackActions}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => submitKiroImportToken()}
+                          loading={state.importSubmitting}
+                        >
+                          {t('auth_login.kiro_import_token_button', { defaultValue: 'Import Token' })}
+                        </Button>
+                      </div>
+                      {state.importStatus === 'success' && (
+                        <div className="status-badge success">
+                          {t('auth_login.kiro_import_token_success', { defaultValue: 'Kiro token imported successfully' })}
+                        </div>
+                      )}
+                      {state.importStatus === 'error' && (
+                        <div className="status-badge error">
+                          {state.importError || t('auth_login.kiro_import_token_error', { defaultValue: 'Failed to import Kiro token' })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {provider.id === 'gemini-cli' && (
                     <div className={styles.geminiProjectField}>
                       <Input
@@ -433,7 +559,7 @@ export function OAuthPage() {
                       />
                     </div>
                   )}
-                  {state.url && DEVICE_CODE_PROVIDERS.includes(provider.id) && state.userCode && (
+                  {state.url && DEVICE_CODE_PROVIDERS.includes(provider.id) && state.userCode && !isKiroImportMode && (
                     <div className={styles.authUrlBox}>
                       <div className={styles.authUrlLabel}>{t('auth_login.device_code_label', { defaultValue: 'Enter this code at the verification URL:' })}</div>
                       <div className={styles.authUrlValue} style={{ fontSize: '1.5em', fontWeight: 'bold', letterSpacing: '0.2em', textAlign: 'center', padding: '8px 0' }}>{state.userCode}</div>
@@ -453,7 +579,7 @@ export function OAuthPage() {
                       </div>
                     </div>
                   )}
-                  {state.url && !DEVICE_CODE_PROVIDERS.includes(provider.id) && (
+                  {state.url && !DEVICE_CODE_PROVIDERS.includes(provider.id) && !isKiroImportMode && (
                     <div className={styles.authUrlBox}>
                       <div className={styles.authUrlLabel}>{t(provider.urlLabelKey)}</div>
                       <div className={styles.authUrlValue}>{state.url}</div>

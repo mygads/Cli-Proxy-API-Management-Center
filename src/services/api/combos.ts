@@ -11,7 +11,8 @@ export interface Combo {
   name: string;
   description?: string;
   status: 'active' | 'draft' | 'disabled';
-  strategy: 'fallback' | 'round-robin' | 'auto';
+  load_balance: boolean;
+  strategy?: 'fallback' | 'round-robin' | 'auto';
   sticky_limit?: number;
   entries: ComboEntry[];
   metadata?: Record<string, unknown>;

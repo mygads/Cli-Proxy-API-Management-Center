@@ -1,25 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { useNotificationStore } from '@/stores';
+import { useAuthStore, useNotificationStore } from '@/stores';
+import { useModelsStore } from '@/stores';
+import { apiKeysApi } from '@/services/api/apiKeys';
+import { useConfigStore } from '@/stores';
 import { combosApi, type Combo, type ComboEntry, type ComboMetrics } from '@/services/api/combos';
+import type { ModelInfo } from '@/utils/models';
 import styles from './CombosPage.module.scss';
 
-const STRATEGIES = ['fallback', 'round-robin', 'auto'] as const;
 const STATUSES = ['active', 'draft', 'disabled'] as const;
-const TRIGGER_OPTIONS = ['quota_exceeded', 'rate_limit', 'error'];
 
-const emptyEntry = (): ComboEntry => ({ priority: 0, model: '', trigger_on: [] });
 const emptyCombo = (): Combo => ({
-  name: '', description: '', status: 'active', strategy: 'fallback', entries: [emptyEntry()]
+  name: '',
+  description: '',
+  status: 'active',
+  load_balance: false,
+  entries: [],
 });
 
-function strategyBadgeClass(s: string) {
-  if (s === 'round-robin') return styles.badgeRoundRobin;
-  if (s === 'auto') return styles.badgeAuto;
-  return styles.badgeFallback;
+function lbBadgeClass(lb: boolean) {
+  return lb ? styles.badgeRoundRobin : styles.badgeFallback;
 }
 function statusBadgeClass(s: string) {
   if (s === 'active') return styles.badgeActive;
@@ -27,18 +30,113 @@ function statusBadgeClass(s: string) {
   return styles.badgeDisabled;
 }
 
+function extractPrefix(model: string): string | null {
+  const idx = model.indexOf('/');
+  if (idx <= 0) return null;
+  return model.slice(0, idx);
+}
+
+interface ModelPickerProps {
+  open: boolean;
+  models: ModelInfo[];
+  existingSelections: string[];
+  loading: boolean;
+  onClose: () => void;
+  onPick: (model: string) => void;
+}
+
+function ModelPicker({ open, models, existingSelections, loading, onClose, onPick }: ModelPickerProps) {
+  const { t } = useTranslation();
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!open) setSearch('');
+  }, [open]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, ModelInfo[]>();
+    const query = search.trim().toLowerCase();
+    models.forEach((m) => {
+      if (query && !m.name.toLowerCase().includes(query)) return;
+      const prefix = extractPrefix(m.name) ?? '(no prefix)';
+      const list = map.get(prefix) ?? [];
+      list.push(m);
+      map.set(prefix, list);
+    });
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [models, search]);
+
+  const existing = useMemo(() => new Set(existingSelections), [existingSelections]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('combos.picker_title', { defaultValue: 'Select Model' })}
+      footer={<Button variant="secondary" onClick={onClose}>{t('common.close', { defaultValue: 'Close' })}</Button>}
+    >
+      <input
+        className={styles.formInput}
+        placeholder={t('combos.picker_search', { defaultValue: 'Search by model id...' })}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
+      {loading ? (
+        <div className={styles.emptyState}>{t('common.loading')}</div>
+      ) : groups.length === 0 ? (
+        <div className={styles.emptyState}>{t('combos.picker_empty', { defaultValue: 'No models match. Try refreshing from the System page first.' })}</div>
+      ) : (
+        <div style={{ maxHeight: 420, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {groups.map(([prefix, items]) => (
+            <div key={prefix}>
+              <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted, #6b7280)', marginBottom: 6 }}>
+                {prefix}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {items.map((m) => {
+                  const already = existing.has(m.name);
+                  return (
+                    <button
+                      key={m.name}
+                      type="button"
+                      className={already ? `${styles.modelPill} ${styles.modelPillAdded}` : styles.modelPill}
+                      onClick={() => onPick(m.name)}
+                      title={m.description || m.alias || m.name}
+                    >
+                      {m.name}
+                      {already ? ' ✓' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function CombosPage() {
   const { t } = useTranslation();
   const { showNotification, showConfirmation } = useNotificationStore();
+  const auth = useAuthStore();
+  const config = useConfigStore((s) => s.config);
+  const models = useModelsStore((s) => s.models);
+  const modelsLoading = useModelsStore((s) => s.loading);
+  const fetchModelsFromStore = useModelsStore((s) => s.fetchModels);
+
   const [combos, setCombos] = useState<Combo[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [form, setForm] = useState<Combo>(emptyCombo());
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'config' | 'entries' | 'metrics'>('config');
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [metrics, setMetrics] = useState<ComboMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const [showMetrics, setShowMetrics] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,20 +152,47 @@ export function CombosPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const ensureModelsLoaded = useCallback(async () => {
+    if (models.length > 0) return;
+    if (auth.connectionStatus !== 'connected' || !auth.apiBase) return;
+    try {
+      const configKeys = Array.isArray(config?.apiKeys) ? (config!.apiKeys as unknown as string[]) : [];
+      let primaryKey = configKeys[0];
+      if (!primaryKey) {
+        try {
+          const list = await apiKeysApi.list();
+          if (Array.isArray(list) && list.length > 0) {
+            const first = list[0] as unknown;
+            if (typeof first === 'string') primaryKey = first;
+            else if (first && typeof first === 'object') {
+              const rec = first as Record<string, unknown>;
+              primaryKey = String(rec['api-key'] ?? rec.apiKey ?? rec.key ?? rec.Key ?? '');
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      await fetchModelsFromStore(auth.apiBase, primaryKey || undefined);
+    } catch (e: unknown) {
+      showNotification(e instanceof Error ? e.message : t('combos.models_load_error', { defaultValue: 'Failed to load model list' }), 'warning');
+    }
+  }, [models.length, auth.connectionStatus, auth.apiBase, config, fetchModelsFromStore, showNotification, t]);
+
   const openCreate = () => {
     setEditingName(null);
     setForm(emptyCombo());
-    setActiveTab('config');
     setMetrics(null);
+    setShowMetrics(false);
     setModalOpen(true);
+    void ensureModelsLoaded();
   };
 
   const openEdit = (combo: Combo) => {
     setEditingName(combo.name);
-    setForm({ ...combo, entries: combo.entries.length ? combo.entries : [emptyEntry()] });
-    setActiveTab('config');
+    setForm({ ...combo, entries: combo.entries.length ? combo.entries : [] });
     setMetrics(null);
+    setShowMetrics(false);
     setModalOpen(true);
+    void ensureModelsLoaded();
   };
 
   const loadMetrics = async (name: string) => {
@@ -82,23 +207,54 @@ export function CombosPage() {
     }
   };
 
-  const handleTabChange = (tab: 'config' | 'entries' | 'metrics') => {
-    setActiveTab(tab);
-    if (tab === 'metrics' && editingName) void loadMetrics(editingName);
+  const toggleMetrics = () => {
+    const next = !showMetrics;
+    setShowMetrics(next);
+    if (next && editingName) void loadMetrics(editingName);
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
+    const name = form.name.trim();
+    if (!name) {
       showNotification(t('combos.name_required', { defaultValue: 'Combo name is required' }), 'warning');
       return;
     }
+    if (!/^[a-zA-Z0-9_.\-\/]+$/.test(name)) {
+      showNotification(t('combos.name_invalid', { defaultValue: 'Name may only contain letters, digits, dashes, underscores, dots, and slashes' }), 'warning');
+      return;
+    }
+    if (form.entries.length === 0) {
+      showNotification(t('combos.entries_required', { defaultValue: 'Add at least one model to the combo' }), 'warning');
+      return;
+    }
+    for (const entry of form.entries) {
+      if (!entry.model.trim()) {
+        showNotification(t('combos.entry_model_required', { defaultValue: 'Each entry needs a model (e.g. cc/claude-opus-4-7)' }), 'warning');
+        return;
+      }
+      if (!entry.model.includes('/')) {
+        showNotification(t('combos.entry_prefix_required', { defaultValue: 'Each entry model must include a provider prefix (e.g. cc/...)' }), 'warning');
+        return;
+      }
+    }
+
+    const payload: Combo = {
+      ...form,
+      name,
+      entries: form.entries.map((entry, idx) => ({
+        ...entry,
+        priority: form.load_balance ? (entry.priority ?? 0) : idx,
+        model: entry.model.trim(),
+      })),
+    };
+
     setSaving(true);
     try {
       if (editingName) {
-        await combosApi.update(editingName, form);
+        await combosApi.update(editingName, payload);
         showNotification(t('combos.updated', { defaultValue: 'Combo updated' }), 'success');
       } else {
-        await combosApi.create(form);
+        await combosApi.create(payload);
         showNotification(t('combos.created', { defaultValue: 'Combo created' }), 'success');
       }
       setModalOpen(false);
@@ -128,12 +284,34 @@ export function CombosPage() {
     });
   };
 
-  const updateEntry = (i: number, patch: Partial<ComboEntry>) => {
-    setForm(f => ({ ...f, entries: f.entries.map((e, idx) => idx === i ? { ...e, ...patch } : e) }));
+  const addModelFromPicker = (model: string) => {
+    setForm((f) => {
+      if (f.entries.some((e) => e.model === model)) {
+        return { ...f, entries: f.entries.filter((e) => e.model !== model) };
+      }
+      return { ...f, entries: [...f.entries, { priority: f.entries.length, model, trigger_on: [] }] };
+    });
   };
 
-  const addEntry = () => setForm(f => ({ ...f, entries: [...f.entries, emptyEntry()] }));
-  const removeEntry = (i: number) => setForm(f => ({ ...f, entries: f.entries.filter((_, idx) => idx !== i) }));
+  const updateEntry = (i: number, patch: Partial<ComboEntry>) => {
+    setForm((f) => ({ ...f, entries: f.entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e)) }));
+  };
+
+  const removeEntry = (i: number) => {
+    setForm((f) => ({ ...f, entries: f.entries.filter((_, idx) => idx !== i) }));
+  };
+
+  const moveEntry = (i: number, direction: -1 | 1) => {
+    setForm((f) => {
+      const j = i + direction;
+      if (j < 0 || j >= f.entries.length) return f;
+      const next = f.entries.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return { ...f, entries: next };
+    });
+  };
+
+  const existingSelections = form.entries.map((e) => e.model);
 
   return (
     <div className={styles.container}>
@@ -153,7 +331,7 @@ export function CombosPage() {
               <tr>
                 <th>{t('combos.col_name', { defaultValue: 'Name' })}</th>
                 <th>{t('combos.col_description', { defaultValue: 'Description' })}</th>
-                <th>{t('combos.col_strategy', { defaultValue: 'Strategy' })}</th>
+                <th>{t('combos.col_strategy', { defaultValue: 'Mode' })}</th>
                 <th>{t('combos.col_entries', { defaultValue: 'Entries' })}</th>
                 <th>{t('combos.col_status', { defaultValue: 'Status' })}</th>
                 <th>{t('common.actions', { defaultValue: 'Actions' })}</th>
@@ -164,7 +342,7 @@ export function CombosPage() {
                 <tr key={c.name}>
                   <td><strong>{c.name}</strong></td>
                   <td>{c.description || '—'}</td>
-                  <td><span className={`${styles.badge} ${strategyBadgeClass(c.strategy)}`}>{c.strategy}</span></td>
+                  <td><span className={`${styles.badge} ${lbBadgeClass(c.load_balance)}`}>{c.load_balance ? 'load balance' : 'fallback'}</span></td>
                   <td>{c.entries?.length ?? 0}</td>
                   <td><span className={`${styles.badge} ${statusBadgeClass(c.status)}`}>{c.status}</span></td>
                   <td>
@@ -187,167 +365,186 @@ export function CombosPage() {
         footer={
           <>
             <Button variant="secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('common.cancel')}</Button>
-            {activeTab !== 'metrics' && (
-              <Button onClick={handleSave} loading={saving}>{t('common.save')}</Button>
-            )}
+            <Button onClick={handleSave} loading={saving}>{t('common.save')}</Button>
           </>
         }
       >
-        <div className={styles.modalTabs}>
-          {(['config', 'entries', ...(editingName ? ['metrics'] : [])] as const).map(tab => (
-            <button
-              key={tab}
-              className={`${styles.tab} ${activeTab === tab ? styles.tabActive : ''}`}
-              onClick={() => handleTabChange(tab as 'config' | 'entries' | 'metrics')}
-            >
-              {t(`combos.tab_${tab}`, { defaultValue: tab.charAt(0).toUpperCase() + tab.slice(1) })}
-            </button>
-          ))}
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>{t('combos.field_name', { defaultValue: 'Name' })} *</label>
+          <input
+            className={styles.formInput}
+            value={form.name}
+            disabled={!!editingName}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="genfity-smart"
+          />
+          <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'Letters, digits, dashes, underscores, dots. Cannot be changed later.' })}</div>
         </div>
 
-        {activeTab === 'config' && (
-          <>
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>{t('combos.field_name', { defaultValue: 'Name' })} *</label>
-              <input
-                className={styles.formInput}
-                value={form.name}
-                disabled={!!editingName}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. genfity-smart"
-              />
-              <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'No "/" allowed. Cannot be changed after creation.' })}</div>
-            </div>
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>{t('combos.field_description', { defaultValue: 'Description' })}</label>
-              <input
-                className={styles.formInput}
-                value={form.description ?? ''}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>{t('combos.field_strategy', { defaultValue: 'Strategy' })}</label>
-              <select
-                className={styles.formSelect}
-                value={form.strategy}
-                onChange={e => setForm(f => ({ ...f, strategy: e.target.value as Combo['strategy'] }))}
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>{t('combos.field_description', { defaultValue: 'Description' })}</label>
+          <input
+            className={styles.formInput}
+            value={form.description ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          />
+        </div>
+
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>{t('combos.field_load_balance', { defaultValue: 'Load Balance' })}</label>
+          <div className={styles.strategyChips}>
+            <button
+              type="button"
+              className={!form.load_balance ? `${styles.strategyChip} ${styles.strategyChipActive}` : styles.strategyChip}
+              onClick={() => setForm((f) => ({ ...f, load_balance: false }))}
+            >
+              {t('combos.mode_fallback', { defaultValue: 'Fallback' })}
+            </button>
+            <button
+              type="button"
+              className={form.load_balance ? `${styles.strategyChip} ${styles.strategyChipActive}` : styles.strategyChip}
+              onClick={() => setForm((f) => ({ ...f, load_balance: true }))}
+            >
+              {t('combos.mode_load_balance', { defaultValue: 'Load Balance' })}
+            </button>
+          </div>
+          <div className={styles.formHint}>
+            {form.load_balance
+              ? t('combos.lb_hint_on', { defaultValue: 'Rotate requests across all entries evenly (round-robin).' })
+              : t('combos.lb_hint_off', { defaultValue: 'Try in order. Move to next entry only when the previous one fails.' })}
+          </div>
+        </div>
+
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>{t('combos.field_status', { defaultValue: 'Status' })}</label>
+          <div className={styles.strategyChips}>
+            {STATUSES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={form.status === s ? `${styles.strategyChip} ${styles.strategyChipActive}` : styles.strategyChip}
+                onClick={() => setForm((f) => ({ ...f, status: s }))}
               >
-                {STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.formGroup}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <label className={styles.formLabel} style={{ marginBottom: 0 }}>
+              {t('combos.field_entries', { defaultValue: 'Models in this combo' })} *
+            </label>
+            <Button size="sm" variant="secondary" onClick={() => { setPickerOpen(true); void ensureModelsLoaded(); }}>
+              + {t('combos.add_model', { defaultValue: 'Add model' })}
+            </Button>
+          </div>
+
+          {form.entries.length === 0 ? (
+            <div className={styles.emptyList}>
+              {t('combos.entries_empty_hint', { defaultValue: 'No models yet. Click "Add model" to pick from the available list.' })}
             </div>
-            {form.strategy === 'round-robin' && (
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>{t('combos.field_sticky_limit', { defaultValue: 'Sticky Limit' })}</label>
-                <input
-                  className={styles.formInput}
-                  type="number"
-                  min={0}
-                  value={form.sticky_limit ?? 0}
-                  onChange={e => setForm(f => ({ ...f, sticky_limit: parseInt(e.target.value) || 0 }))}
-                />
-                <div className={styles.formHint}>{t('combos.sticky_limit_hint', { defaultValue: 'Number of requests to stick to one entry before rotating.' })}</div>
+          ) : (
+            <div className={styles.entryList}>
+              {form.entries.map((entry, i) => (
+                <div key={`${entry.model}-${i}`} className={styles.entryCard}>
+                  <div className={styles.entryIndex}>{i + 1}</div>
+                  <div className={styles.entryBody}>
+                    <input
+                      className={styles.formInput}
+                      value={entry.model}
+                      onChange={(e) => updateEntry(i, { model: e.target.value })}
+                      placeholder="cc/claude-opus-4-7"
+                    />
+                    <input
+                      className={styles.formInput}
+                      value={(entry.trigger_on ?? []).join(', ')}
+                      onChange={(e) => updateEntry(i, {
+                        trigger_on: e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                      })}
+                      placeholder={t('combos.trigger_placeholder', { defaultValue: 'trigger_on e.g. rate_limit, quota_exceeded (optional)' })}
+                      style={{ marginTop: 6 }}
+                    />
+                  </div>
+                  <div className={styles.entryControls}>
+                    <Button size="sm" variant="secondary" onClick={() => moveEntry(i, -1)} disabled={i === 0} title={t('combos.move_up', { defaultValue: 'Move up' })}>↑</Button>
+                    <Button size="sm" variant="secondary" onClick={() => moveEntry(i, 1)} disabled={i === form.entries.length - 1} title={t('combos.move_down', { defaultValue: 'Move down' })}>↓</Button>
+                    <Button size="sm" variant="danger" onClick={() => removeEntry(i)}>✕</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className={styles.formHint}>
+            {form.load_balance
+              ? t('combos.entries_hint_round_robin', { defaultValue: 'All entries are rotated evenly.' })
+              : t('combos.entries_hint_fallback', { defaultValue: 'Order = priority. The first entry is tried first.' })}
+          </div>
+        </div>
+
+        {editingName && (
+          <div className={styles.formGroup}>
+            <Button size="sm" variant="secondary" onClick={toggleMetrics}>
+              {showMetrics
+                ? t('combos.hide_metrics', { defaultValue: 'Hide metrics' })
+                : t('combos.show_metrics', { defaultValue: 'Show metrics' })}
+            </Button>
+            {showMetrics && (
+              <div style={{ marginTop: 12 }}>
+                {metricsLoading ? (
+                  <div className={styles.emptyState}>{t('common.loading')}</div>
+                ) : !metrics || metrics.entries.length === 0 ? (
+                  <div className={styles.emptyState}>{t('combos.no_metrics', { defaultValue: 'No metrics data yet.' })}</div>
+                ) : (
+                  <>
+                    <div className={styles.formHint} style={{ marginBottom: 8 }}>
+                      {t('combos.metrics_window', { defaultValue: 'Window' })}: {metrics.window}
+                    </div>
+                    <table className={styles.metricsTable}>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>{t('combos.metrics_total', { defaultValue: 'Total' })}</th>
+                          <th>{t('combos.metrics_success', { defaultValue: 'Success' })}</th>
+                          <th>{t('combos.metrics_rate', { defaultValue: 'Rate' })}</th>
+                          <th>p50 (s)</th>
+                          <th>p95 (s)</th>
+                          <th>p99 (s)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {metrics.entries.map(e => (
+                          <tr key={e.entry_index}>
+                            <td>{e.entry_index}</td>
+                            <td>{e.total_requests}</td>
+                            <td>{e.success_count}</td>
+                            <td>{(e.success_rate * 100).toFixed(1)}%</td>
+                            <td>{e.latency_p50_sec.toFixed(3)}</td>
+                            <td>{e.latency_p95_sec.toFixed(3)}</td>
+                            <td>{e.latency_p99_sec.toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
               </div>
             )}
-            <div className={styles.formGroup}>
-              <label className={styles.formLabel}>{t('combos.field_status', { defaultValue: 'Status' })}</label>
-              <select
-                className={styles.formSelect}
-                value={form.status}
-                onChange={e => setForm(f => ({ ...f, status: e.target.value as Combo['status'] }))}
-              >
-                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'entries' && (
-          <>
-            {form.entries.map((entry, i) => (
-              <div key={i} className={styles.entryRow}>
-                <div>
-                  <label className={styles.formLabel}>{t('combos.entry_priority', { defaultValue: 'Priority' })}</label>
-                  <input
-                    className={styles.formInput}
-                    type="number"
-                    value={entry.priority}
-                    onChange={e => updateEntry(i, { priority: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-                <div>
-                  <label className={styles.formLabel}>{t('combos.entry_model', { defaultValue: 'Model (prefix/model)' })}</label>
-                  <input
-                    className={styles.formInput}
-                    value={entry.model}
-                    onChange={e => updateEntry(i, { model: e.target.value })}
-                    placeholder="cc/claude-opus-4-7"
-                  />
-                </div>
-                <div>
-                  <label className={styles.formLabel}>{t('combos.entry_trigger_on', { defaultValue: 'Trigger On' })}</label>
-                  <select
-                    className={styles.formSelect}
-                    multiple
-                    value={entry.trigger_on ?? []}
-                    onChange={e => updateEntry(i, { trigger_on: Array.from(e.target.selectedOptions, o => o.value) })}
-                    style={{ height: 72 }}
-                  >
-                    {TRIGGER_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                  <div className={styles.formHint}>{t('combos.trigger_hint', { defaultValue: 'Empty = all retriable errors' })}</div>
-                </div>
-                <div style={{ paddingTop: 24 }}>
-                  <Button size="sm" variant="danger" onClick={() => removeEntry(i)} disabled={form.entries.length <= 1}>✕</Button>
-                </div>
-              </div>
-            ))}
-            <Button variant="secondary" size="sm" className={styles.addEntryBtn} onClick={addEntry}>
-              {t('combos.add_entry', { defaultValue: '+ Add Entry' })}
-            </Button>
-          </>
-        )}
-
-        {activeTab === 'metrics' && (
-          metricsLoading ? (
-            <div className={styles.emptyState}>{t('common.loading')}</div>
-          ) : !metrics || metrics.entries.length === 0 ? (
-            <div className={styles.emptyState}>{t('combos.no_metrics', { defaultValue: 'No metrics data yet.' })}</div>
-          ) : (
-            <>
-              <div className={styles.formHint} style={{ marginBottom: 12 }}>
-                {t('combos.metrics_window', { defaultValue: 'Window' })}: {metrics.window}
-              </div>
-              <table className={styles.metricsTable}>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>{t('combos.metrics_total', { defaultValue: 'Total' })}</th>
-                    <th>{t('combos.metrics_success', { defaultValue: 'Success' })}</th>
-                    <th>{t('combos.metrics_rate', { defaultValue: 'Rate' })}</th>
-                    <th>p50 (s)</th>
-                    <th>p95 (s)</th>
-                    <th>p99 (s)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {metrics.entries.map(e => (
-                    <tr key={e.entry_index}>
-                      <td>{e.entry_index}</td>
-                      <td>{e.total_requests}</td>
-                      <td>{e.success_count}</td>
-                      <td>{(e.success_rate * 100).toFixed(1)}%</td>
-                      <td>{e.latency_p50_sec.toFixed(3)}</td>
-                      <td>{e.latency_p95_sec.toFixed(3)}</td>
-                      <td>{e.latency_p99_sec.toFixed(3)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )
+          </div>
         )}
       </Modal>
+
+      <ModelPicker
+        open={pickerOpen}
+        models={models}
+        existingSelections={existingSelections}
+        loading={modelsLoading}
+        onClose={() => setPickerOpen(false)}
+        onPick={(m) => {
+          addModelFromPicker(m);
+        }}
+      />
     </div>
   );
 }

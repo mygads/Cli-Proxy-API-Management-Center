@@ -901,6 +901,13 @@ export function VisualConfigEditor({
                   onChange={(forceModelPrefix) => onChange({ forceModelPrefix })}
                 />
                 <ToggleRow
+                  title={t('config_management.visual.sections.network.load_balance')}
+                  description={t('config_management.visual.sections.network.load_balance_desc')}
+                  checked={values.routingLoadBalance}
+                  disabled={disabled}
+                  onChange={(routingLoadBalance) => onChange({ routingLoadBalance })}
+                />
+                <ToggleRow
                   title={t('config_management.visual.sections.network.session_affinity')}
                   checked={values.routingSessionAffinity}
                   disabled={disabled}

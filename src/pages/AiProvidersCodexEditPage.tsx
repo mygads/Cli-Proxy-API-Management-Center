@@ -437,8 +437,13 @@ export function AiProvidersCodexEditPage() {
 
     const trimmedBaseUrl = (form.baseUrl ?? '').trim();
     const baseUrl = trimmedBaseUrl || undefined;
+    const prefix = (form.prefix ?? '').trim();
     if (!baseUrl) {
       showNotification(t('notification.codex_base_url_required'), 'error');
+      return;
+    }
+    if (!prefix) {
+      showNotification(t('notification.prefix_required'), 'error');
       return;
     }
 
@@ -448,7 +453,7 @@ export function AiProvidersCodexEditPage() {
       const payload: ProviderKeyConfig = {
         apiKey: form.apiKey.trim(),
         priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
-        prefix: form.prefix?.trim() || undefined,
+        prefix,
         baseUrl,
         websockets: Boolean(form.websockets),
         proxyUrl: form.proxyUrl?.trim() || undefined,

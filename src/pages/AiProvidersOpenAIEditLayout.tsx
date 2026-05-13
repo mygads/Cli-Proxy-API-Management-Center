@@ -456,9 +456,14 @@ export function AiProvidersOpenAIEditLayout() {
   const handleSave = useCallback(async () => {
     const name = form.name.trim();
     const baseUrl = form.baseUrl.trim();
+    const prefix = (form.prefix ?? '').trim();
 
     if (!name || !baseUrl) {
       showNotification(t('notification.openai_provider_required'), 'error');
+      return;
+    }
+    if (!prefix) {
+      showNotification(t('notification.prefix_required'), 'error');
       return;
     }
 
@@ -466,7 +471,7 @@ export function AiProvidersOpenAIEditLayout() {
     try {
       const payload: OpenAIProviderConfig = {
         name,
-        prefix: form.prefix?.trim() || undefined,
+        prefix,
         baseUrl,
         headers: buildHeaderObject(form.headers),
         apiKeyEntries: form.apiKeyEntries.map((entry: ApiKeyEntry) => ({

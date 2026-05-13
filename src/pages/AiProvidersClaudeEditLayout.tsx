@@ -401,12 +401,18 @@ export function AiProvidersClaudeEditLayout() {
       !disableControls && !saving && !resolvedLoading && !invalidIndexParam && !invalidIndex;
     if (!canSave) return;
 
+    const prefix = (form.prefix ?? '').trim();
+    if (!prefix) {
+      showNotification(t('notification.prefix_required'), 'error');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload: ProviderKeyConfig = {
         apiKey: form.apiKey.trim(),
         priority: form.priority !== undefined ? Math.trunc(form.priority) : undefined,
-        prefix: form.prefix?.trim() || undefined,
+        prefix,
         baseUrl: (form.baseUrl ?? '').trim() || undefined,
         proxyUrl: form.proxyUrl?.trim() || undefined,
         headers: buildHeaderObject(form.headers),
