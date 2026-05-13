@@ -16,6 +16,11 @@ import iconGemini from '@/assets/icons/gemini.svg';
 import iconKimiLight from '@/assets/icons/kimi-light.svg';
 import iconKimiDark from '@/assets/icons/kimi-dark.svg';
 import iconVertex from '@/assets/icons/vertex.svg';
+import iconKiro from '@/assets/icons/kiro.svg';
+import iconGithub from '@/assets/icons/github.svg';
+import iconQwen from '@/assets/icons/qwen.svg';
+import iconCline from '@/assets/icons/cline.svg';
+import iconKilocode from '@/assets/icons/kilocode.svg';
 
 interface ProviderState {
   url?: string;
@@ -29,6 +34,8 @@ interface ProviderState {
   callbackSubmitting?: boolean;
   callbackStatus?: 'success' | 'error';
   callbackError?: string;
+  userCode?: string;
+  verificationUri?: string;
 }
 
 interface VertexImportResult {
@@ -67,10 +74,16 @@ const PROVIDERS: { id: OAuthProvider; titleKey: string; hintKey: string; urlLabe
   { id: 'anthropic', titleKey: 'auth_login.anthropic_oauth_title', hintKey: 'auth_login.anthropic_oauth_hint', urlLabelKey: 'auth_login.anthropic_oauth_url_label', icon: iconClaude },
   { id: 'antigravity', titleKey: 'auth_login.antigravity_oauth_title', hintKey: 'auth_login.antigravity_oauth_hint', urlLabelKey: 'auth_login.antigravity_oauth_url_label', icon: iconAntigravity },
   { id: 'gemini-cli', titleKey: 'auth_login.gemini_cli_oauth_title', hintKey: 'auth_login.gemini_cli_oauth_hint', urlLabelKey: 'auth_login.gemini_cli_oauth_url_label', icon: iconGemini },
-  { id: 'kimi', titleKey: 'auth_login.kimi_oauth_title', hintKey: 'auth_login.kimi_oauth_hint', urlLabelKey: 'auth_login.kimi_oauth_url_label', icon: { light: iconKimiLight, dark: iconKimiDark } }
+  { id: 'kimi', titleKey: 'auth_login.kimi_oauth_title', hintKey: 'auth_login.kimi_oauth_hint', urlLabelKey: 'auth_login.kimi_oauth_url_label', icon: { light: iconKimiLight, dark: iconKimiDark } },
+  { id: 'kiro', titleKey: 'auth_login.kiro_oauth_title', hintKey: 'auth_login.kiro_oauth_hint', urlLabelKey: 'auth_login.kiro_oauth_url_label', icon: iconKiro },
+  { id: 'github', titleKey: 'auth_login.github_oauth_title', hintKey: 'auth_login.github_oauth_hint', urlLabelKey: 'auth_login.github_oauth_url_label', icon: iconGithub },
+  { id: 'qwen', titleKey: 'auth_login.qwen_oauth_title', hintKey: 'auth_login.qwen_oauth_hint', urlLabelKey: 'auth_login.qwen_oauth_url_label', icon: iconQwen },
+  { id: 'cline', titleKey: 'auth_login.cline_oauth_title', hintKey: 'auth_login.cline_oauth_hint', urlLabelKey: 'auth_login.cline_oauth_url_label', icon: iconCline },
+  { id: 'kilocode', titleKey: 'auth_login.kilocode_oauth_title', hintKey: 'auth_login.kilocode_oauth_hint', urlLabelKey: 'auth_login.kilocode_oauth_url_label', icon: iconKilocode },
 ];
 
-const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli'];
+const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli', 'kiro', 'qwen', 'cline', 'kilocode'];
+const DEVICE_CODE_PROVIDERS: OAuthProvider[] = ['github'];
 const SUCCESS_RESET_DELAY_MS = 5000;
 const getProviderI18nPrefix = (provider: OAuthProvider) => provider.replace('-', '_');
 const getAuthKey = (provider: OAuthProvider, suffix: string) =>
@@ -240,7 +253,14 @@ export function OAuthPage() {
         showNotification(message, 'error');
         return;
       }
-      updateProviderState(provider, { url: res.url, state: res.state, status: 'waiting', polling: true });
+      updateProviderState(provider, {
+        url: res.url,
+        state: res.state,
+        status: 'waiting',
+        polling: true,
+        userCode: res.user_code,
+        verificationUri: res.verification_uri ?? res.url,
+      });
       startPolling(provider, res.state);
     } catch (err: unknown) {
       const message = getErrorMessage(err);
@@ -413,7 +433,27 @@ export function OAuthPage() {
                       />
                     </div>
                   )}
-                  {state.url && (
+                  {state.url && DEVICE_CODE_PROVIDERS.includes(provider.id) && state.userCode && (
+                    <div className={styles.authUrlBox}>
+                      <div className={styles.authUrlLabel}>{t('auth_login.device_code_label', { defaultValue: 'Enter this code at the verification URL:' })}</div>
+                      <div className={styles.authUrlValue} style={{ fontSize: '1.5em', fontWeight: 'bold', letterSpacing: '0.2em', textAlign: 'center', padding: '8px 0' }}>{state.userCode}</div>
+                      <div className={styles.authUrlLabel} style={{ marginTop: 8 }}>{t(provider.urlLabelKey)}</div>
+                      <div className={styles.authUrlValue}>{state.verificationUri ?? state.url}</div>
+                      <div className={styles.authUrlActions}>
+                        <Button variant="secondary" size="sm" onClick={() => copyLink(state.userCode!)}>
+                          {t('auth_login.copy_code', { defaultValue: 'Copy Code' })}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => window.open(state.verificationUri ?? state.url, '_blank', 'noopener,noreferrer')}
+                        >
+                          {t(getAuthKey(provider.id, 'open_link'))}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {state.url && !DEVICE_CODE_PROVIDERS.includes(provider.id) && (
                     <div className={styles.authUrlBox}>
                       <div className={styles.authUrlLabel}>{t(provider.urlLabelKey)}</div>
                       <div className={styles.authUrlValue}>{state.url}</div>

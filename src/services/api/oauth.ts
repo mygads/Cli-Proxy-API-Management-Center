@@ -9,18 +9,36 @@ export type OAuthProvider =
   | 'anthropic'
   | 'antigravity'
   | 'gemini-cli'
-  | 'kimi';
+  | 'kimi'
+  | 'kiro'
+  | 'github'
+  | 'qwen'
+  | 'cline'
+  | 'kilocode';
 
 export interface OAuthStartResponse {
   url: string;
   state?: string;
+  verification_uri?: string;
+  user_code?: string;
+  expires_in?: number;
+  interval?: number;
 }
 
 export interface OAuthCallbackResponse {
   status: 'ok';
 }
 
-const WEBUI_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli'];
+const WEBUI_SUPPORTED: OAuthProvider[] = [
+  'codex',
+  'anthropic',
+  'antigravity',
+  'gemini-cli',
+  'kiro',
+  'qwen',
+  'cline',
+  'kilocode'
+];
 const CALLBACK_PROVIDER_MAP: Partial<Record<OAuthProvider, string>> = {
   'gemini-cli': 'gemini'
 };

@@ -8,6 +8,8 @@ export * from './ampcode';
 export * from './providers';
 export * from './authFiles';
 export * from './oauth';
+export * from './combos';
+export * from './health';
 export * from './logs';
 export * from './version';
 export * from './models';
