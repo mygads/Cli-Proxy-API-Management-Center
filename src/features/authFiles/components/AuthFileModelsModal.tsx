@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { AuthFileModelItem } from '@/features/authFiles/constants';
 import { isModelExcluded } from '@/features/authFiles/constants';
 import { authFilesApi } from '@/services/api';
+import { useNotificationStore } from '@/stores';
 import styles from '@/pages/AuthFilesPage.module.scss';
 
 export type AuthFileModelsModalProps = {
@@ -21,18 +22,27 @@ export type AuthFileModelsModalProps = {
   excluded: Record<string, string[]>;
   onClose: () => void;
   onCopyText: (text: string) => void;
+  onRefresh?: () => void;
 };
 
 type TestState = Record<string, { loading: boolean; ok?: boolean; latencyMs?: number; error?: string }>;
 
+const OAUTH_CHANNELS = new Set(['claude', 'codex', 'kiro', 'github', 'gemini-cli', 'kimi', 'qwen', 'cline', 'kilocode', 'antigravity']);
+
 export function AuthFileModelsModal(props: AuthFileModelsModalProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { open, fileName, fileType, loading, error, models, excluded, onClose, onCopyText } = props;
+  const showNotification = useNotificationStore((state) => state.showNotification);
+  const { open, fileName, fileType, loading, error, models, excluded, onClose, onCopyText, onRefresh } = props;
 
   const [testState, setTestState] = useState<TestState>({});
   const [customModel, setCustomModel] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customAlias, setCustomAlias] = useState('');
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [addingModel, setAddingModel] = useState(false);
+
+  const isOAuthProvider = OAUTH_CHANNELS.has((fileType || '').toLowerCase());
+  const channel = (fileType || '').toLowerCase();
 
   const handleTest = useCallback(async (modelId: string) => {
     setTestState((prev) => ({ ...prev, [modelId]: { loading: true } }));
@@ -48,13 +58,30 @@ export function AuthFileModelsModal(props: AuthFileModelsModalProps) {
     }
   }, [fileName]);
 
-  const handleAddCustomModel = () => {
-    const trimmed = customModel.trim();
-    if (!trimmed) return;
-    void handleTest(trimmed);
-    setCustomModel('');
-    setShowCustomInput(false);
-  };
+  const handleAddModel = useCallback(async () => {
+    const name = customModel.trim();
+    const alias = customAlias.trim();
+    if (!name) return;
+
+    setAddingModel(true);
+    try {
+      const existingAliases = await authFilesApi.getOauthModelAlias();
+      const channelAliases = existingAliases[channel] ?? [];
+      const newEntry = { name, alias: alias || name };
+      const updated = [...channelAliases, newEntry];
+      await authFilesApi.saveOauthModelAlias(channel, updated);
+      showNotification(t('auth_files.model_added_success', { defaultValue: `Model "${alias || name}" added to ${channel}` }), 'success');
+      setCustomModel('');
+      setCustomAlias('');
+      setShowAddModel(false);
+      onRefresh?.();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to add model';
+      showNotification(msg, 'error');
+    } finally {
+      setAddingModel(false);
+    }
+  }, [customModel, customAlias, channel, t, showNotification, onRefresh]);
 
   const handleNavigateAlias = () => {
     onClose();
@@ -75,12 +102,16 @@ export function AuthFileModelsModal(props: AuthFileModelsModalProps) {
       footer={
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '100%', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Button variant="secondary" size="sm" onClick={handleNavigateAlias}>
-              {t('auth_files.manage_aliases', { defaultValue: 'Manage Aliases' })}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={handleNavigateExcluded}>
-              {t('auth_files.manage_excluded', { defaultValue: 'Manage Excluded' })}
-            </Button>
+            {isOAuthProvider && (
+              <>
+                <Button variant="secondary" size="sm" onClick={handleNavigateAlias}>
+                  {t('auth_files.manage_aliases', { defaultValue: 'Manage Aliases' })}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={handleNavigateExcluded}>
+                  {t('auth_files.manage_excluded', { defaultValue: 'Manage Excluded' })}
+                </Button>
+              </>
+            )}
           </div>
           <Button variant="secondary" onClick={onClose}>
             {t('common.close')}
@@ -101,11 +132,11 @@ export function AuthFileModelsModal(props: AuthFileModelsModalProps) {
         />
       ) : (
         <>
-          {models.length === 0 && !showCustomInput ? (
+          {models.length === 0 && !showAddModel ? (
             <EmptyState
               title={t('auth_files.models_empty', { defaultValue: 'No models available' })}
               description={t('auth_files.models_empty_desc', {
-                defaultValue: 'This credential may not be loaded or has no bound models'
+                defaultValue: 'This credential may not be loaded or has no bound models. Use "Add Model" to add one.'
               })}
             />
           ) : (
@@ -196,28 +227,45 @@ export function AuthFileModelsModal(props: AuthFileModelsModalProps) {
             </div>
           )}
 
-          {/* Add custom model */}
+          {/* Add Model section */}
           <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-color, #e5e7eb)', paddingTop: '12px' }}>
-            {showCustomInput ? (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-                <div style={{ flex: 1 }}>
-                  <Input
-                    value={customModel}
-                    placeholder={t('auth_files.custom_model_placeholder', { defaultValue: 'Enter model name to test' })}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddCustomModel(); }}
-                  />
+            {showAddModel ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ flex: 1 }}>
+                    <Input
+                      value={customModel}
+                      placeholder={t('auth_files.add_model_name_placeholder', { defaultValue: 'Model name (upstream)' })}
+                      onChange={(e) => setCustomModel(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && customModel.trim()) void handleAddModel(); }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Input
+                      value={customAlias}
+                      placeholder={t('auth_files.add_model_alias_placeholder', { defaultValue: 'Alias (client-facing, optional)' })}
+                      onChange={(e) => setCustomAlias(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && customModel.trim()) void handleAddModel(); }}
+                    />
+                  </div>
                 </div>
-                <Button size="sm" onClick={handleAddCustomModel} disabled={!customModel.trim()}>
-                  {t('auth_files.test_model', { defaultValue: 'Test' })}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setShowCustomInput(false)}>
-                  {t('common.cancel', { defaultValue: 'Cancel' })}
-                </Button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {isOAuthProvider && (
+                    <Button size="sm" onClick={() => void handleAddModel()} disabled={!customModel.trim() || addingModel} loading={addingModel}>
+                      {t('auth_files.add_model_save', { defaultValue: 'Add Model' })}
+                    </Button>
+                  )}
+                  <Button variant="secondary" size="sm" onClick={() => void handleTest(customModel.trim())} disabled={!customModel.trim()}>
+                    {t('auth_files.test_model', { defaultValue: 'Test' })}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => { setShowAddModel(false); setCustomModel(''); setCustomAlias(''); }}>
+                    {t('common.cancel', { defaultValue: 'Cancel' })}
+                  </Button>
+                </div>
               </div>
             ) : (
-              <Button variant="secondary" size="sm" onClick={() => setShowCustomInput(true)}>
-                {t('auth_files.add_custom_model', { defaultValue: 'Test Custom Model' })}
+              <Button variant="secondary" size="sm" onClick={() => setShowAddModel(true)}>
+                {t('auth_files.add_model_button', { defaultValue: 'Add Model' })}
               </Button>
             )}
           </div>

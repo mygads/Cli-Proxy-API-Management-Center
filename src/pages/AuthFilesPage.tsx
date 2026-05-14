@@ -905,6 +905,7 @@ export function AuthFilesPage() {
         excluded={excluded}
         onClose={closeModelsModal}
         onCopyText={copyTextWithNotification}
+        onRefresh={loadFiles}
       />
 
       <AuthFilesPrefixProxyEditorModal
