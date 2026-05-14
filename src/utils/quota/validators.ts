@@ -43,6 +43,26 @@ export function isKimiFile(file: AuthFileItem): boolean {
   return resolveAuthProvider(file) === 'kimi';
 }
 
+export function isGithubFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'github';
+}
+
+export function isKiroFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'kiro';
+}
+
+export function isQwenFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'qwen';
+}
+
+export function isClineFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'cline';
+}
+
+export function isKilocodeFile(file: AuthFileItem): boolean {
+  return resolveAuthProvider(file) === 'kilocode';
+}
+
 export function isRuntimeOnlyAuthFile(file: AuthFileItem): boolean {
   const raw = file['runtime_only'] ?? file.runtimeOnly;
   if (typeof raw === 'boolean') return raw;

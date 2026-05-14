@@ -306,3 +306,32 @@ export interface KimiQuotaState {
   error?: string;
   errorStatus?: number;
 }
+
+// GitHub Copilot quota types
+export interface GitHubQuotaSnapshot {
+  used: number;
+  total: number;
+  remaining?: number;
+  unlimited: boolean;
+}
+
+export interface GitHubQuotaState {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  plan?: string | null;
+  resetDate?: string | null;
+  quotas: {
+    chat?: GitHubQuotaSnapshot | null;
+    completions?: GitHubQuotaSnapshot | null;
+    premium_interactions?: GitHubQuotaSnapshot | null;
+  };
+  error?: string;
+  errorStatus?: number;
+}
+
+// Generic OAuth provider status (for providers without quota API)
+export interface GenericOAuthQuotaState {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  message?: string;
+  error?: string;
+  errorStatus?: number;
+}

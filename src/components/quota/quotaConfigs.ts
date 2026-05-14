@@ -28,6 +28,9 @@ import type {
   GeminiCliUserTier,
   KimiQuotaRow,
   KimiQuotaState,
+  GitHubQuotaState,
+  GitHubQuotaSnapshot,
+  GenericOAuthQuotaState,
 } from '@/types';
 import { apiCallApi, authFilesApi, getApiCallErrorMessage } from '@/services/api';
 import { useQuotaStore } from '@/stores';
@@ -73,6 +76,11 @@ import {
   isDisabledAuthFile,
   isGeminiCliFile,
   isKimiFile,
+  isGithubFile,
+  isKiroFile,
+  isQwenFile,
+  isClineFile,
+  isKilocodeFile,
   isRuntimeOnlyAuthFile,
 } from '@/utils/quota';
 import { normalizeAuthIndex } from '@/utils/authIndex';
@@ -81,7 +89,7 @@ import styles from '@/pages/QuotaPage.module.scss';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
-type QuotaType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi';
+type QuotaType = 'antigravity' | 'claude' | 'codex' | 'gemini-cli' | 'kimi' | 'github' | 'kiro' | 'qwen' | 'cline' | 'kilocode';
 
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = 'bamboo-precept-lgxtn';
 const QUOTA_PROGRESS_HIGH_THRESHOLD = 70;
@@ -98,11 +106,21 @@ export interface QuotaStore {
   codexQuota: Record<string, CodexQuotaState>;
   geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
+  githubQuota: Record<string, GitHubQuotaState>;
+  kiroQuota: Record<string, GenericOAuthQuotaState>;
+  qwenQuota: Record<string, GenericOAuthQuotaState>;
+  clineQuota: Record<string, GenericOAuthQuotaState>;
+  kilocodeQuota: Record<string, GenericOAuthQuotaState>;
   setAntigravityQuota: (updater: QuotaUpdater<Record<string, AntigravityQuotaState>>) => void;
   setClaudeQuota: (updater: QuotaUpdater<Record<string, ClaudeQuotaState>>) => void;
   setCodexQuota: (updater: QuotaUpdater<Record<string, CodexQuotaState>>) => void;
   setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
+  setGithubQuota: (updater: QuotaUpdater<Record<string, GitHubQuotaState>>) => void;
+  setKiroQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
+  setQwenQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
+  setClineQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
+  setKilocodeQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
   clearQuotaCache: () => void;
 }
 
@@ -1352,3 +1370,204 @@ export const KIMI_CONFIG: QuotaConfig<KimiQuotaState, KimiQuotaRow[]> = {
   gridClassName: styles.kimiGrid,
   renderQuotaItems: renderKimiItems,
 };
+
+// --- GitHub Copilot Quota ---
+
+const GITHUB_COPILOT_USER_URL = 'https://api.github.com/copilot_internal/user';
+const GITHUB_REQUEST_HEADERS: Record<string, string> = {
+  'Accept': 'application/json',
+  'X-GitHub-Api-Version': '2025-01-21',
+  'User-Agent': 'GithubCopilot/1.0',
+};
+
+const formatGitHubQuotaSnapshot = (quota: Record<string, unknown> | null | undefined): GitHubQuotaSnapshot => {
+  if (!quota) return { used: 0, total: 0, unlimited: true };
+  const entitlement = typeof quota.entitlement === 'number' ? quota.entitlement : 0;
+  const remaining = typeof quota.remaining === 'number' ? quota.remaining : 0;
+  const unlimited = Boolean(quota.unlimited);
+  return { used: entitlement - remaining, total: entitlement, remaining, unlimited };
+};
+
+const fetchGithubQuota = async (
+  file: AuthFileItem,
+  t: TFunction
+): Promise<{ plan: string | null; resetDate: string | null; quotas: GitHubQuotaState['quotas'] }> => {
+  const rawAuthIndex = file['auth_index'] ?? file.authIndex;
+  const authIndex = normalizeAuthIndex(rawAuthIndex);
+  if (!authIndex) {
+    throw new Error(t('github_quota.missing_auth_index', { defaultValue: 'Missing auth index' }));
+  }
+
+  const result = await apiCallApi.request({
+    authIndex,
+    method: 'GET',
+    url: GITHUB_COPILOT_USER_URL,
+    header: { ...GITHUB_REQUEST_HEADERS },
+  });
+
+  if (result.statusCode < 200 || result.statusCode >= 300) {
+    throw createStatusError(getApiCallErrorMessage(result), result.statusCode);
+  }
+
+  let data: Record<string, unknown> = {};
+  const body = result.body ?? result.bodyText;
+  if (typeof body === 'string') {
+    try { data = JSON.parse(body) as Record<string, unknown>; } catch { data = {}; }
+  } else if (body && typeof body === 'object') {
+    data = body as Record<string, unknown>;
+  }
+
+  const quotaSnapshots = data.quota_snapshots as Record<string, Record<string, unknown>> | undefined;
+  if (quotaSnapshots) {
+    return {
+      plan: (data.copilot_plan as string) ?? null,
+      resetDate: (data.quota_reset_date as string) ?? null,
+      quotas: {
+        chat: formatGitHubQuotaSnapshot(quotaSnapshots.chat),
+        completions: formatGitHubQuotaSnapshot(quotaSnapshots.completions),
+        premium_interactions: formatGitHubQuotaSnapshot(quotaSnapshots.premium_interactions),
+      },
+    };
+  }
+
+  const monthlyQuotas = (data.monthly_quotas ?? {}) as Record<string, number>;
+  const usedQuotas = (data.limited_user_quotas ?? {}) as Record<string, number>;
+  return {
+    plan: (data.copilot_plan as string) ?? (data.access_type_sku as string) ?? null,
+    resetDate: (data.limited_user_reset_date as string) ?? null,
+    quotas: {
+      chat: { used: usedQuotas.chat ?? 0, total: monthlyQuotas.chat ?? 0, unlimited: false },
+      completions: { used: usedQuotas.completions ?? 0, total: monthlyQuotas.completions ?? 0, unlimited: false },
+    },
+  };
+};
+
+const renderGithubItems = (
+  quota: GitHubQuotaState,
+  t: TFunction,
+  helpers: QuotaRenderHelpers
+): ReactNode => {
+  const { styles: styleMap, QuotaProgressBar } = helpers;
+  const { createElement: h, Fragment } = React;
+  const nodes: ReactNode[] = [];
+
+  if (quota.plan) {
+    nodes.push(
+      h('div', { key: 'plan', className: styleMap.codexPlan },
+        h('span', { className: styleMap.codexPlanLabel }, t('github_quota.plan_label', { defaultValue: 'Plan' })),
+        h('span', { className: styleMap.codexPlanValue }, quota.plan)
+      )
+    );
+  }
+
+  const quotaEntries = Object.entries(quota.quotas).filter(([, v]) => v != null) as [string, GitHubQuotaSnapshot][];
+  if (quotaEntries.length === 0) {
+    nodes.push(h('div', { key: 'empty', className: styleMap.quotaMessage }, t('github_quota.connected', { defaultValue: 'GitHub Copilot connected' })));
+    return h(Fragment, null, ...nodes);
+  }
+
+  nodes.push(...quotaEntries.map(([key, snapshot]) => {
+    if (snapshot.unlimited) {
+      return h('div', { key, className: styleMap.quotaRow },
+        h('div', { className: styleMap.quotaRowHeader },
+          h('span', { className: styleMap.quotaModel }, t(`github_quota.${key}`, { defaultValue: key })),
+          h('div', { className: styleMap.quotaMeta },
+            h('span', { className: styleMap.quotaPercent }, 'Unlimited')
+          )
+        ),
+        h(QuotaProgressBar, { percent: 100, highThreshold: 70, mediumThreshold: 30 })
+      );
+    }
+    const remaining = snapshot.total > 0 ? Math.round(((snapshot.total - snapshot.used) / snapshot.total) * 100) : 0;
+    return h('div', { key, className: styleMap.quotaRow },
+      h('div', { className: styleMap.quotaRowHeader },
+        h('span', { className: styleMap.quotaModel }, t(`github_quota.${key}`, { defaultValue: key })),
+        h('div', { className: styleMap.quotaMeta },
+          h('span', { className: styleMap.quotaPercent }, `${remaining}%`),
+          h('span', { className: styleMap.quotaAmount }, `${snapshot.used} / ${snapshot.total}`)
+        )
+      ),
+      h(QuotaProgressBar, { percent: remaining, highThreshold: 70, mediumThreshold: 30 })
+    );
+  }));
+
+  if (quota.resetDate) {
+    nodes.push(h('div', { key: 'reset', className: styleMap.quotaMessage },
+      t('github_quota.reset_date', { defaultValue: 'Resets: {{date}}', date: quota.resetDate })
+    ));
+  }
+
+  return h(Fragment, null, ...nodes);
+};
+
+export const GITHUB_CONFIG: QuotaConfig<
+  GitHubQuotaState,
+  { plan: string | null; resetDate: string | null; quotas: GitHubQuotaState['quotas'] }
+> = {
+  type: 'github',
+  i18nPrefix: 'github_quota',
+  cardIdleMessageKey: 'quota_management.card_idle_hint',
+  filterFn: (file) => isGithubFile(file) && !isDisabledAuthFile(file),
+  fetchQuota: fetchGithubQuota,
+  storeSelector: (state) => state.githubQuota,
+  storeSetter: 'setGithubQuota',
+  buildLoadingState: () => ({ status: 'loading', quotas: {} }),
+  buildSuccessState: (data) => ({ status: 'success', plan: data.plan, resetDate: data.resetDate, quotas: data.quotas }),
+  buildErrorState: (message, status) => ({ status: 'error', quotas: {}, error: message, errorStatus: status }),
+  cardClassName: styles.githubCard ?? styles.codexCard,
+  controlsClassName: styles.codexControls,
+  controlClassName: styles.codexControl,
+  gridClassName: styles.codexGrid,
+  renderQuotaItems: renderGithubItems,
+};
+
+// --- Generic OAuth Status Cards (Kiro, Qwen, Cline, KiloCode) ---
+
+const fetchGenericOAuthStatus = async (
+  file: AuthFileItem,
+  _t: TFunction
+): Promise<string> => {
+  const disabled = (file as { disabled?: boolean }).disabled;
+  if (disabled) return 'disabled';
+  const status = typeof file.status === 'string' ? file.status.trim() : '';
+  return status || 'connected';
+};
+
+const renderGenericOAuthItems = (
+  quota: GenericOAuthQuotaState,
+  t: TFunction,
+  helpers: QuotaRenderHelpers
+): ReactNode => {
+  const { styles: styleMap } = helpers;
+  const { createElement: h } = React;
+  const message = quota.message || t('quota_management.generic_connected', { defaultValue: 'Connected' });
+  return h('div', { className: styleMap.quotaMessage }, message);
+};
+
+const buildGenericOAuthConfig = (
+  type: QuotaType,
+  i18nPrefix: string,
+  filterFn: (file: AuthFileItem) => boolean,
+  cardClassName: string
+): QuotaConfig<GenericOAuthQuotaState, string> => ({
+  type,
+  i18nPrefix,
+  cardIdleMessageKey: 'quota_management.card_idle_hint',
+  filterFn: (file) => filterFn(file) && !isDisabledAuthFile(file),
+  fetchQuota: fetchGenericOAuthStatus,
+  storeSelector: (state) => (state as unknown as Record<string, Record<string, GenericOAuthQuotaState>>)[`${type}Quota`] ?? {},
+  storeSetter: `set${type.charAt(0).toUpperCase() + type.slice(1)}Quota` as keyof QuotaStore,
+  buildLoadingState: () => ({ status: 'loading' }),
+  buildSuccessState: (message) => ({ status: 'success', message }),
+  buildErrorState: (message, status) => ({ status: 'error', error: message, errorStatus: status }),
+  cardClassName,
+  controlsClassName: styles.codexControls,
+  controlClassName: styles.codexControl,
+  gridClassName: styles.codexGrid,
+  renderQuotaItems: renderGenericOAuthItems,
+});
+
+export const KIRO_CONFIG = buildGenericOAuthConfig('kiro', 'kiro_quota', isKiroFile, styles.codexCard);
+export const QWEN_CONFIG = buildGenericOAuthConfig('qwen', 'qwen_quota', isQwenFile, styles.codexCard);
+export const CLINE_CONFIG = buildGenericOAuthConfig('cline', 'cline_quota', isClineFile, styles.codexCard);
+export const KILOCODE_CONFIG = buildGenericOAuthConfig('kilocode', 'kilocode_quota', isKilocodeFile, styles.codexCard);
