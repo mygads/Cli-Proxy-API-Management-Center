@@ -191,6 +191,12 @@ export function AuthFileCard(props: AuthFileCardProps) {
               <span className={styles.fileName} title={file.name}>
                 {file.name}
               </span>
+              {!compact && file.label && (
+                <div className={styles.noteText} title={file.label as string}>
+                  <span className={styles.noteLabel}>{t('auth_files.label_field')}</span>
+                  <span className={styles.noteValue}>{file.label as string}</span>
+                </div>
+              )}
               {!compact && noteValue && (
                 <div className={styles.noteText} title={noteValue}>
                   <span className={styles.noteLabel}>{t('auth_files.note_display')}</span>

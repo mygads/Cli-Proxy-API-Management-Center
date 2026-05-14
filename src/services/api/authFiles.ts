@@ -16,6 +16,7 @@ export type AuthFileFieldsPatch = {
   headers?: Record<string, string>;
   priority?: number;
   note?: string;
+  label?: string;
 };
 type AuthFileBatchFailure = { name: string; error: string };
 type AuthFileBatchUploadResponse = {
@@ -526,5 +527,14 @@ export const authFilesApi = {
     return Array.isArray(models)
       ? (models as { id: string; display_name?: string; type?: string; owned_by?: string }[])
       : [];
-  }
+  },
+
+  // 测试 auth 文件对指定模型的连通性
+  async testAuthFileModel(name: string, model: string): Promise<{ ok: boolean; latency_ms?: number; error?: string; status?: number }> {
+    const data = await apiClient.post<{ ok: boolean; latency_ms?: number; error?: string; status?: number }>(
+      '/auth-files/test',
+      { name, model }
+    );
+    return data;
+  },
 };

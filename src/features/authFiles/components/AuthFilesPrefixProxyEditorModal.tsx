@@ -111,6 +111,13 @@ export function AuthFilesPrefixProxyEditorModal(props: AuthFilesPrefixProxyEdito
               </div>
               <div className={styles.prefixProxyFields}>
                 <Input
+                  label={t('auth_files.label_field')}
+                  value={editor.label}
+                  placeholder={t('auth_files.label_placeholder')}
+                  disabled={disableControls || editor.saving || !editor.json}
+                  onChange={(e) => onChange('label', e.target.value)}
+                />
+                <Input
                   label={t('auth_files.prefix_label')}
                   value={editor.prefix}
                   disabled={disableControls || editor.saving || !editor.json}

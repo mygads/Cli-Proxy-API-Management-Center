@@ -11,7 +11,7 @@ type AuthFileHeadersErrorKey =
   | 'auth_files.headers_invalid_object'
   | 'auth_files.headers_invalid_value';
 
-export type PrefixProxyEditorField = 'prefix' | 'proxyUrl' | 'priority' | 'note' | 'headersText';
+export type PrefixProxyEditorField = 'prefix' | 'proxyUrl' | 'priority' | 'note' | 'headersText' | 'label';
 
 export type PrefixProxyEditorFieldValue = string;
 
@@ -24,6 +24,8 @@ export type PrefixProxyEditorState = {
   originalText: string;
   rawText: string;
   json: Record<string, unknown> | null;
+  label: string;
+  labelTouched: boolean;
   prefix: string;
   proxyUrl: string;
   priority: string;
@@ -160,6 +162,14 @@ const buildAuthFileFieldsPatch = (
   const original = editor.json ?? {};
   const patch: AuthFileFieldsPatch = {};
 
+  if (editor.labelTouched) {
+    const originalLabel = normalizeTextField(original.label);
+    const nextLabel = editor.label.trim();
+    if (nextLabel !== originalLabel) {
+      patch.label = nextLabel;
+    }
+  }
+
   const originalPrefix = normalizeTextField(original.prefix);
   const nextPrefix = editor.prefix.trim();
   if (nextPrefix !== originalPrefix) {
@@ -221,6 +231,13 @@ const buildPrefixProxyUpdatedText = (
   if (!editor?.json) return editor?.rawText ?? '';
   const patch = buildAuthFileFieldsPatch(editor, resolveHeadersError);
   const next: Record<string, unknown> = { ...editor.json };
+  if (patch.label !== undefined) {
+    if (patch.label) {
+      next.label = patch.label;
+    } else {
+      delete next.label;
+    }
+  }
   if (patch.prefix !== undefined) {
     if (patch.prefix) {
       next.prefix = patch.prefix;
@@ -303,6 +320,8 @@ export function useAuthFilesPrefixProxyEditor(
       originalText: '',
       rawText: '',
       json: null,
+      label: '',
+      labelTouched: false,
       prefix: '',
       proxyUrl: '',
       priority: '',
@@ -350,6 +369,7 @@ export function useAuthFilesPrefixProxyEditor(
 
       const json = { ...(parsed as Record<string, unknown>) };
       const originalText = JSON.stringify(json);
+      const label = typeof json.label === 'string' ? json.label : (typeof file.label === 'string' ? file.label : '');
       const prefix = typeof json.prefix === 'string' ? json.prefix : '';
       const proxyUrl = typeof json.proxy_url === 'string' ? json.proxy_url : '';
       const priority = parsePriorityValue(json.priority);
@@ -371,6 +391,8 @@ export function useAuthFilesPrefixProxyEditor(
           originalText,
           rawText: originalText,
           json,
+          label,
+          labelTouched: false,
           prefix,
           proxyUrl,
           priority: priority !== undefined ? String(priority) : '',
@@ -398,6 +420,7 @@ export function useAuthFilesPrefixProxyEditor(
   ) => {
     setPrefixProxyEditor((prev) => {
       if (!prev) return prev;
+      if (field === 'label') return { ...prev, label: String(value), labelTouched: true };
       if (field === 'prefix') return { ...prev, prefix: String(value) };
       if (field === 'proxyUrl') return { ...prev, proxyUrl: String(value) };
       if (field === 'priority') return { ...prev, priority: String(value) };
