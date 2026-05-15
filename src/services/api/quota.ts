@@ -10,23 +10,25 @@
 
 import { apiClient } from './client';
 
-export interface KiroModelEntry {
-  id: string;
-  name?: string;
-  description?: string;
-  rate_multiplier?: number;
-  rate_unit?: string;
-  max_input_tokens?: number;
-  max_output_tokens?: number;
+export interface KiroQuotaUsage {
+  resource_type?: string;
+  display_name?: string;
+  used: number;
+  total: number;
+  remaining: number;
+  unit?: string;
+  reset_at?: string;
+  unlimited: boolean;
+  is_free_trial?: boolean;
 }
 
 export interface KiroQuotaResponse {
   plan?: string;
   email?: string;
+  user_id?: string;
   profile_arn?: string;
   region?: string;
-  default_model?: string;
-  models?: KiroModelEntry[];
+  quotas?: Record<string, KiroQuotaUsage>;
   message?: string;
 }
 

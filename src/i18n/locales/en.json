@@ -739,15 +739,16 @@
   "kiro_quota": {
     "title": "Kiro Quota",
     "empty_title": "No Kiro Auth Files",
-    "empty_desc": "Connect a Kiro credential to view CodeWhisperer model catalog.",
-    "idle": "Click here to refresh model catalog",
-    "loading": "Loading Kiro models...",
+    "empty_desc": "Connect a Kiro credential to view CodeWhisperer credits.",
+    "idle": "Click here to refresh credits",
+    "loading": "Loading Kiro credits...",
     "load_failed": "Failed to load quota: {{message}}",
     "missing_auth_index": "Auth file missing auth_index",
-    "empty_models": "Kiro returned an empty model catalog.",
+    "empty_quotas": "Kiro returned an empty usage breakdown.",
+    "plan_label": "Plan",
     "email_label": "Email",
-    "default_model_label": "Default model",
-    "max_input_tokens": "Max input {{count}}"
+    "free_trial_suffix": "(Free Trial)",
+    "unlimited": "Unlimited"
   },
   "github_quota": {
     "title": "GitHub Copilot Quota",

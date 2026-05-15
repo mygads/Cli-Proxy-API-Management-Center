@@ -336,31 +336,31 @@ export interface GenericOAuthQuotaState {
   errorStatus?: number;
 }
 
-// Kiro AI (CodeWhisperer) quota types. The BE calls
-// AmazonCodeWhispererService.ListAvailableModels on getKiroQuota and
-// returns the upstream catalog reduced to the fields the UI renders. There
-// is no public credit-balance endpoint (getUserCredits returns 404), so
-// this card shows the per-model rate multipliers Kiro IDE itself displays
-// next to each model in its picker. See:
-// internal/api/handlers/management/kiro_quota.go for the source of truth.
-export interface KiroModelEntry {
-  id: string;
-  name?: string;
-  description?: string;
-  rateMultiplier?: number;
-  rateUnit?: string;
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
+// Kiro AI usage shape returned by the BE handler. Mirrors 9router's
+// open-sse/services/usage.js parseKiroQuotaData output: a flat quota
+// map keyed by resourceType (lowercased) with optional `_freetrial`
+// suffix for the free-trial bucket. Source of truth for the snapshot
+// shape lives in internal/api/handlers/management/kiro_quota.go.
+export interface KiroQuotaUsage {
+  resourceType?: string;
+  displayName?: string;
+  used: number;
+  total: number;
+  remaining: number;
+  unit?: string;
+  resetAt?: string;
+  unlimited: boolean;
+  isFreeTrial?: boolean;
 }
 
 export interface KiroQuotaState {
   status: 'idle' | 'loading' | 'success' | 'error';
   plan?: string | null;
   email?: string | null;
+  userId?: string | null;
   profileArn?: string | null;
   region?: string | null;
-  defaultModel?: string | null;
-  models?: KiroModelEntry[];
+  quotas?: Record<string, KiroQuotaUsage>;
   message?: string | null;
   error?: string;
   errorStatus?: number;

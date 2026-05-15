@@ -1,0 +1,105 @@
+# ===================================================================================
+# Cli-Proxy-API-Management-Center (FE) - CI/CD PIPELINE
+# ===================================================================================
+#
+# Build dist/index.html (the all-in-one HTML bundle) on every push to main,
+# then SSH to the VPS and drop it in as management.html for the
+# cli-proxy-api container to serve.
+#
+# The CLIProxyAPI binary serves whatever file lives at
+#   /data/cliproxy/objectstore/objectstore/config/static/management.html
+# inside the container. With docker-compose volume mount that translates to
+# host path:
+#   /home/cicddeploy/genfity/ai-core2/static/management.html
+#
+# We therefore deploy the bundle straight to that path and leave the
+# binary's auto-updater disabled (panel-github-repository points at the
+# fork already; disable-auto-update-panel: true keeps the binary from
+# overwriting our deploy when upstream cuts a new release).
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+env:
+  REMOTE_PATH: /home/cicddeploy/genfity/ai-core2/static/management.html
+  CONTAINER_NAME: cli-proxy-api
+
+jobs:
+  build:
+    name: Build dist/index.html
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all-in-one HTML
+        run: npm run build
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: management-html
+          path: dist/index.html
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: management-html
+          path: ./bundle
+
+      - name: Copy management.html to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: ./bundle/index.html
+          target: /tmp/cli-proxy-management/
+          strip_components: 1
+
+      - name: Install bundle and reload container
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            sudo install -m 644 -o root -g root \
+              /tmp/cli-proxy-management/index.html \
+              ${{ env.REMOTE_PATH }}
+            rm -f /tmp/cli-proxy-management/index.html
+            rmdir /tmp/cli-proxy-management 2>/dev/null || true
+            ls -lh ${{ env.REMOTE_PATH }}
+
+            # No container restart required — the binary reads the static
+            # file from disk on every request. Touch it so the front-end
+            # cache buster (mtime header) flips.
+            sudo touch ${{ env.REMOTE_PATH }}

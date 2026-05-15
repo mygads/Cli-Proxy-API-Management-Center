@@ -31,7 +31,7 @@ import type {
   GitHubQuotaState,
   GitHubQuotaSnapshot,
   KiroQuotaState,
-  KiroModelEntry,
+  KiroQuotaUsage,
   GenericOAuthQuotaState,
 } from '@/types';
 import { apiCallApi, authFilesApi, getApiCallErrorMessage, kiroQuotaApi, githubQuotaApi } from '@/services/api';
@@ -1542,19 +1542,18 @@ export const KILOCODE_CONFIG = buildGenericOAuthConfig('kilocode', 'kilocode_quo
 // --- Kiro AI (CodeWhisperer) Quota ---
 //
 // Probe goes through GET /v0/management/kiro-quota — the BE rotates the
-// access_token (which expires ~1h), persists, then calls
-// AmazonCodeWhispererService.ListAvailableModels (the same endpoint Kiro
-// IDE uses to render its model picker). AWS does NOT expose a public
-// credit-balance endpoint, so the card surfaces the catalog + per-model
-// rate multipliers — exactly what Kiro IDE shows next to each model.
+// access_token (which expires ~1h), persists, then calls the same
+// `getUsageLimits` endpoint Kiro IDE polls for the credit badge. Response
+// is normalised into a flat quota map (e.g. {credit, credit_freetrial})
+// matching 9router's /dashboard/quota output.
 
 interface KiroQuotaFetchResult {
   plan: string | null;
   email: string | null;
+  userId: string | null;
   profileArn: string | null;
   region: string | null;
-  defaultModel: string | null;
-  models: KiroModelEntry[];
+  quotas: Record<string, KiroQuotaUsage>;
   message: string | null;
 }
 
@@ -1569,13 +1568,30 @@ const fetchKiroQuota = async (
   }
 
   const data = await kiroQuotaApi.fetch(authIndex);
+  const quotas: Record<string, KiroQuotaUsage> = {};
+  if (data.quotas) {
+    for (const [k, v] of Object.entries(data.quotas)) {
+      quotas[k] = {
+        resourceType: v.resource_type,
+        displayName: v.display_name,
+        used: v.used,
+        total: v.total,
+        remaining: v.remaining,
+        unit: v.unit,
+        resetAt: v.reset_at,
+        unlimited: Boolean(v.unlimited),
+        isFreeTrial: Boolean(v.is_free_trial),
+      };
+    }
+  }
+
   return {
     plan: data.plan ?? null,
     email: data.email ?? null,
+    userId: data.user_id ?? null,
     profileArn: data.profile_arn ?? null,
     region: data.region ?? null,
-    defaultModel: data.default_model ?? null,
-    models: data.models ?? [],
+    quotas,
     message: data.message ?? null,
   };
 };
@@ -1585,10 +1601,20 @@ const renderKiroItems = (
   t: TFunction,
   helpers: QuotaRenderHelpers
 ): ReactNode => {
-  const { styles: styleMap } = helpers;
+  const { styles: styleMap, QuotaProgressBar } = helpers;
   const { createElement: h, Fragment } = React;
   const nodes: ReactNode[] = [];
 
+  if (quota.plan) {
+    nodes.push(
+      h(
+        'div',
+        { key: 'plan', className: styleMap.codexPlan },
+        h('span', { className: styleMap.codexPlanLabel }, t('kiro_quota.plan_label', { defaultValue: 'Plan' })),
+        h('span', { className: styleMap.codexPlanValue }, quota.plan)
+      )
+    );
+  }
   if (quota.email) {
     nodes.push(
       h(
@@ -1600,71 +1626,77 @@ const renderKiroItems = (
     );
   }
 
-  if (quota.defaultModel) {
-    nodes.push(
-      h(
-        'div',
-        { key: 'default-model', className: styleMap.codexPlan },
-        h(
-          'span',
-          { className: styleMap.codexPlanLabel },
-          t('kiro_quota.default_model_label', { defaultValue: 'Default model' })
-        ),
-        h('span', { className: styleMap.codexPlanValue }, quota.defaultModel)
-      )
-    );
-  }
-
-  const models = quota.models ?? [];
-  if (models.length === 0) {
+  const entries = quota.quotas ? Object.entries(quota.quotas) : [];
+  if (entries.length === 0) {
     const message =
       quota.message ||
-      t('kiro_quota.empty_models', {
-        defaultValue: 'Kiro returned an empty model catalog.',
+      t('kiro_quota.empty_quotas', {
+        defaultValue: 'Kiro returned an empty usage breakdown.',
       });
     nodes.push(h('div', { key: 'empty', className: styleMap.quotaMessage }, message));
     return h(Fragment, null, ...nodes);
   }
 
-  // Each model row mirrors the codex/claude plan pattern: model name on the
-  // left, rate multiplier on the right. No progress bar — there is no
-  // remaining-quota number per model from this endpoint.
-  for (const m of models) {
-    const rateLabel =
-      typeof m.rateMultiplier === 'number' && m.rateMultiplier > 0
-        ? `${m.rateMultiplier}x ${m.rateUnit || 'Credit'}`
-        : m.rateUnit || '';
-    const tokenLabel =
-      m.maxInputTokens && m.maxInputTokens > 0
-        ? t('kiro_quota.max_input_tokens', {
-            defaultValue: 'Max input {{count}}',
-            count: m.maxInputTokens,
-          })
-        : '';
+  // Sort: regular row first, then its _freetrial sibling.
+  entries.sort(([a], [b]) => {
+    const aFt = a.endsWith('_freetrial');
+    const bFt = b.endsWith('_freetrial');
+    if (aFt !== bFt) return aFt ? 1 : -1;
+    return a.localeCompare(b);
+  });
+
+  for (const [key, usage] of entries) {
+    const total = usage.total;
+    const used = usage.used;
+    const remaining = usage.remaining;
+    const percent =
+      total > 0 ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100))) : null;
+    const usedLabel = total > 0 ? `${formatKiroAmount(used)} / ${formatKiroAmount(total)}` : '';
+    const resetLabel = usage.resetAt ? formatQuotaResetTime(usage.resetAt) : '';
+    const titleBase =
+      usage.displayName || usage.resourceType || key.replace('_freetrial', '');
+    const title = usage.isFreeTrial
+      ? `${titleBase} ${t('kiro_quota.free_trial_suffix', { defaultValue: '(Free Trial)' })}`
+      : titleBase;
+
     nodes.push(
       h(
         'div',
-        { key: m.id, className: styleMap.quotaRow },
+        { key, className: styleMap.quotaRow },
         h(
           'div',
           { className: styleMap.quotaRowHeader },
-          h(
-            'span',
-            { className: styleMap.quotaModel, title: m.description || m.name || m.id },
-            m.name ? `${m.name} (${m.id})` : m.id
-          ),
+          h('span', { className: styleMap.quotaModel, title }, title),
           h(
             'div',
             { className: styleMap.quotaMeta },
-            rateLabel ? h('span', { className: styleMap.quotaPercent }, rateLabel) : null,
-            tokenLabel ? h('span', { className: styleMap.quotaAmount }, tokenLabel) : null
+            h(
+              'span',
+              { className: styleMap.quotaPercent },
+              percent === null
+                ? t('kiro_quota.unlimited', { defaultValue: 'Unlimited' })
+                : `${percent}%`
+            ),
+            usedLabel ? h('span', { className: styleMap.quotaAmount }, usedLabel) : null,
+            resetLabel ? h('span', { className: styleMap.quotaReset }, resetLabel) : null
           )
-        )
+        ),
+        h(QuotaProgressBar, {
+          percent,
+          highThreshold: QUOTA_PROGRESS_HIGH_THRESHOLD,
+          mediumThreshold: QUOTA_PROGRESS_MEDIUM_THRESHOLD,
+        })
       )
     );
   }
 
   return h(Fragment, null, ...nodes);
+};
+
+const formatKiroAmount = (n: number): string => {
+  if (!Number.isFinite(n)) return '0';
+  if (Math.abs(n - Math.round(n)) < 0.005) return Math.round(n).toString();
+  return n.toFixed(2);
 };
 
 export const KIRO_CONFIG: QuotaConfig<KiroQuotaState, KiroQuotaFetchResult> = {
@@ -1680,10 +1712,10 @@ export const KIRO_CONFIG: QuotaConfig<KiroQuotaState, KiroQuotaFetchResult> = {
     status: 'success',
     plan: data.plan,
     email: data.email,
+    userId: data.userId,
     profileArn: data.profileArn,
     region: data.region,
-    defaultModel: data.defaultModel,
-    models: data.models,
+    quotas: data.quotas,
     message: data.message,
   }),
   buildErrorState: (message, status) => ({
