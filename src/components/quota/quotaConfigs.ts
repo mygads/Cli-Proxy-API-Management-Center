@@ -30,9 +30,11 @@ import type {
   KimiQuotaState,
   GitHubQuotaState,
   GitHubQuotaSnapshot,
+  KiroQuotaState,
+  KiroModelEntry,
   GenericOAuthQuotaState,
 } from '@/types';
-import { apiCallApi, authFilesApi, getApiCallErrorMessage } from '@/services/api';
+import { apiCallApi, authFilesApi, getApiCallErrorMessage, kiroQuotaApi, githubQuotaApi } from '@/services/api';
 import { useQuotaStore } from '@/stores';
 import {
   ANTIGRAVITY_QUOTA_URLS,
@@ -107,7 +109,7 @@ export interface QuotaStore {
   geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
   githubQuota: Record<string, GitHubQuotaState>;
-  kiroQuota: Record<string, GenericOAuthQuotaState>;
+  kiroQuota: Record<string, KiroQuotaState>;
   qwenQuota: Record<string, GenericOAuthQuotaState>;
   clineQuota: Record<string, GenericOAuthQuotaState>;
   kilocodeQuota: Record<string, GenericOAuthQuotaState>;
@@ -117,7 +119,7 @@ export interface QuotaStore {
   setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setGithubQuota: (updater: QuotaUpdater<Record<string, GitHubQuotaState>>) => void;
-  setKiroQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
+  setKiroQuota: (updater: QuotaUpdater<Record<string, KiroQuotaState>>) => void;
   setQwenQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
   setClineQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
   setKilocodeQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
@@ -1372,21 +1374,14 @@ export const KIMI_CONFIG: QuotaConfig<KimiQuotaState, KimiQuotaRow[]> = {
 };
 
 // --- GitHub Copilot Quota ---
-
-const GITHUB_COPILOT_USER_URL = 'https://api.github.com/copilot_internal/user';
-const GITHUB_REQUEST_HEADERS: Record<string, string> = {
-  'Accept': 'application/json',
-  'X-GitHub-Api-Version': '2025-01-21',
-  'User-Agent': 'GithubCopilot/1.0',
-};
-
-const formatGitHubQuotaSnapshot = (quota: Record<string, unknown> | null | undefined): GitHubQuotaSnapshot => {
-  if (!quota) return { used: 0, total: 0, unlimited: true };
-  const entitlement = typeof quota.entitlement === 'number' ? quota.entitlement : 0;
-  const remaining = typeof quota.remaining === 'number' ? quota.remaining : 0;
-  const unlimited = Boolean(quota.unlimited);
-  return { used: entitlement - remaining, total: entitlement, remaining, unlimited };
-};
+//
+// Probe goes through the BE at GET /v0/management/github-quota — the BE
+// rotates the Copilot bearer token (which expires ~30 min) and persists
+// any rotated fields to disk before hitting api.github.com/copilot_internal/user.
+// We used to do the upstream call directly via apiCallApi.request, but the
+// auth scheme there is "token <gho_...>" which Copilot's internal endpoint
+// rejects — see src/lib/oauth/services/kiro.ts in OmniRoute for the
+// reference flow this mirrors.
 
 const fetchGithubQuota = async (
   file: AuthFileItem,
@@ -1398,47 +1393,20 @@ const fetchGithubQuota = async (
     throw new Error(t('github_quota.missing_auth_index', { defaultValue: 'Missing auth index' }));
   }
 
-  const result = await apiCallApi.request({
-    authIndex,
-    method: 'GET',
-    url: GITHUB_COPILOT_USER_URL,
-    header: { ...GITHUB_REQUEST_HEADERS },
-  });
-
-  if (result.statusCode < 200 || result.statusCode >= 300) {
-    throw createStatusError(getApiCallErrorMessage(result), result.statusCode);
+  const data = await githubQuotaApi.fetch(authIndex);
+  const quotas: GitHubQuotaState['quotas'] = {};
+  if (data.quotas) {
+    if (data.quotas.chat) quotas.chat = data.quotas.chat as GitHubQuotaSnapshot;
+    if (data.quotas.completions) quotas.completions = data.quotas.completions as GitHubQuotaSnapshot;
+    if (data.quotas.premium_interactions) {
+      quotas.premium_interactions = data.quotas.premium_interactions as GitHubQuotaSnapshot;
+    }
   }
 
-  let data: Record<string, unknown> = {};
-  const body = result.body ?? result.bodyText;
-  if (typeof body === 'string') {
-    try { data = JSON.parse(body) as Record<string, unknown>; } catch { data = {}; }
-  } else if (body && typeof body === 'object') {
-    data = body as Record<string, unknown>;
-  }
-
-  const quotaSnapshots = data.quota_snapshots as Record<string, Record<string, unknown>> | undefined;
-  if (quotaSnapshots) {
-    return {
-      plan: (data.copilot_plan as string) ?? null,
-      resetDate: (data.quota_reset_date as string) ?? null,
-      quotas: {
-        chat: formatGitHubQuotaSnapshot(quotaSnapshots.chat),
-        completions: formatGitHubQuotaSnapshot(quotaSnapshots.completions),
-        premium_interactions: formatGitHubQuotaSnapshot(quotaSnapshots.premium_interactions),
-      },
-    };
-  }
-
-  const monthlyQuotas = (data.monthly_quotas ?? {}) as Record<string, number>;
-  const usedQuotas = (data.limited_user_quotas ?? {}) as Record<string, number>;
   return {
-    plan: (data.copilot_plan as string) ?? (data.access_type_sku as string) ?? null,
-    resetDate: (data.limited_user_reset_date as string) ?? null,
-    quotas: {
-      chat: { used: usedQuotas.chat ?? 0, total: monthlyQuotas.chat ?? 0, unlimited: false },
-      completions: { used: usedQuotas.completions ?? 0, total: monthlyQuotas.completions ?? 0, unlimited: false },
-    },
+    plan: data.plan ?? null,
+    resetDate: data.reset_date ?? null,
+    quotas,
   };
 };
 
@@ -1567,7 +1535,165 @@ const buildGenericOAuthConfig = (
   renderQuotaItems: renderGenericOAuthItems,
 });
 
-export const KIRO_CONFIG = buildGenericOAuthConfig('kiro', 'kiro_quota', isKiroFile, styles.codexCard);
 export const QWEN_CONFIG = buildGenericOAuthConfig('qwen', 'qwen_quota', isQwenFile, styles.codexCard);
 export const CLINE_CONFIG = buildGenericOAuthConfig('cline', 'cline_quota', isClineFile, styles.codexCard);
 export const KILOCODE_CONFIG = buildGenericOAuthConfig('kilocode', 'kilocode_quota', isKilocodeFile, styles.codexCard);
+
+// --- Kiro AI (CodeWhisperer) Quota ---
+//
+// Probe goes through GET /v0/management/kiro-quota — the BE rotates the
+// access_token (which expires ~1h), persists, then calls
+// AmazonCodeWhispererService.ListAvailableModels (the same endpoint Kiro
+// IDE uses to render its model picker). AWS does NOT expose a public
+// credit-balance endpoint, so the card surfaces the catalog + per-model
+// rate multipliers — exactly what Kiro IDE shows next to each model.
+
+interface KiroQuotaFetchResult {
+  plan: string | null;
+  email: string | null;
+  profileArn: string | null;
+  region: string | null;
+  defaultModel: string | null;
+  models: KiroModelEntry[];
+  message: string | null;
+}
+
+const fetchKiroQuota = async (
+  file: AuthFileItem,
+  t: TFunction
+): Promise<KiroQuotaFetchResult> => {
+  const rawAuthIndex = file['auth_index'] ?? file.authIndex;
+  const authIndex = normalizeAuthIndex(rawAuthIndex);
+  if (!authIndex) {
+    throw new Error(t('kiro_quota.missing_auth_index', { defaultValue: 'Missing auth index' }));
+  }
+
+  const data = await kiroQuotaApi.fetch(authIndex);
+  return {
+    plan: data.plan ?? null,
+    email: data.email ?? null,
+    profileArn: data.profile_arn ?? null,
+    region: data.region ?? null,
+    defaultModel: data.default_model ?? null,
+    models: data.models ?? [],
+    message: data.message ?? null,
+  };
+};
+
+const renderKiroItems = (
+  quota: KiroQuotaState,
+  t: TFunction,
+  helpers: QuotaRenderHelpers
+): ReactNode => {
+  const { styles: styleMap } = helpers;
+  const { createElement: h, Fragment } = React;
+  const nodes: ReactNode[] = [];
+
+  if (quota.email) {
+    nodes.push(
+      h(
+        'div',
+        { key: 'email', className: styleMap.codexPlan },
+        h('span', { className: styleMap.codexPlanLabel }, t('kiro_quota.email_label', { defaultValue: 'Email' })),
+        h('span', { className: styleMap.codexPlanValue }, quota.email)
+      )
+    );
+  }
+
+  if (quota.defaultModel) {
+    nodes.push(
+      h(
+        'div',
+        { key: 'default-model', className: styleMap.codexPlan },
+        h(
+          'span',
+          { className: styleMap.codexPlanLabel },
+          t('kiro_quota.default_model_label', { defaultValue: 'Default model' })
+        ),
+        h('span', { className: styleMap.codexPlanValue }, quota.defaultModel)
+      )
+    );
+  }
+
+  const models = quota.models ?? [];
+  if (models.length === 0) {
+    const message =
+      quota.message ||
+      t('kiro_quota.empty_models', {
+        defaultValue: 'Kiro returned an empty model catalog.',
+      });
+    nodes.push(h('div', { key: 'empty', className: styleMap.quotaMessage }, message));
+    return h(Fragment, null, ...nodes);
+  }
+
+  // Each model row mirrors the codex/claude plan pattern: model name on the
+  // left, rate multiplier on the right. No progress bar — there is no
+  // remaining-quota number per model from this endpoint.
+  for (const m of models) {
+    const rateLabel =
+      typeof m.rateMultiplier === 'number' && m.rateMultiplier > 0
+        ? `${m.rateMultiplier}x ${m.rateUnit || 'Credit'}`
+        : m.rateUnit || '';
+    const tokenLabel =
+      m.maxInputTokens && m.maxInputTokens > 0
+        ? t('kiro_quota.max_input_tokens', {
+            defaultValue: 'Max input {{count}}',
+            count: m.maxInputTokens,
+          })
+        : '';
+    nodes.push(
+      h(
+        'div',
+        { key: m.id, className: styleMap.quotaRow },
+        h(
+          'div',
+          { className: styleMap.quotaRowHeader },
+          h(
+            'span',
+            { className: styleMap.quotaModel, title: m.description || m.name || m.id },
+            m.name ? `${m.name} (${m.id})` : m.id
+          ),
+          h(
+            'div',
+            { className: styleMap.quotaMeta },
+            rateLabel ? h('span', { className: styleMap.quotaPercent }, rateLabel) : null,
+            tokenLabel ? h('span', { className: styleMap.quotaAmount }, tokenLabel) : null
+          )
+        )
+      )
+    );
+  }
+
+  return h(Fragment, null, ...nodes);
+};
+
+export const KIRO_CONFIG: QuotaConfig<KiroQuotaState, KiroQuotaFetchResult> = {
+  type: 'kiro',
+  i18nPrefix: 'kiro_quota',
+  cardIdleMessageKey: 'quota_management.card_idle_hint',
+  filterFn: (file) => isKiroFile(file) && !isDisabledAuthFile(file),
+  fetchQuota: fetchKiroQuota,
+  storeSelector: (state) => state.kiroQuota,
+  storeSetter: 'setKiroQuota',
+  buildLoadingState: () => ({ status: 'loading' }),
+  buildSuccessState: (data) => ({
+    status: 'success',
+    plan: data.plan,
+    email: data.email,
+    profileArn: data.profileArn,
+    region: data.region,
+    defaultModel: data.defaultModel,
+    models: data.models,
+    message: data.message,
+  }),
+  buildErrorState: (message, status) => ({
+    status: 'error',
+    error: message,
+    errorStatus: status,
+  }),
+  cardClassName: styles.codexCard,
+  controlsClassName: styles.codexControls,
+  controlClassName: styles.codexControl,
+  gridClassName: styles.codexGrid,
+  renderQuotaItems: renderKiroItems,
+};

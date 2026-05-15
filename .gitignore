@@ -16,7 +16,6 @@ codex_usage.json
 style.md
 
 node_modules
-dist
 dist-ssr
 *.local
 skills
@@ -33,4 +32,3 @@ settings.local.json
 *.njsproj
 *.sln
 *.sw?
-management.html

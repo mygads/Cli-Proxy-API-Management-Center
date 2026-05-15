@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AntigravityQuotaState, ClaudeQuotaState, CodexQuotaState, GeminiCliQuotaState, KimiQuotaState, GitHubQuotaState, GenericOAuthQuotaState } from '@/types';
+import type { AntigravityQuotaState, ClaudeQuotaState, CodexQuotaState, GeminiCliQuotaState, KimiQuotaState, GitHubQuotaState, KiroQuotaState, GenericOAuthQuotaState } from '@/types';
 
 type QuotaUpdater<T> = T | ((prev: T) => T);
 
@@ -10,7 +10,7 @@ interface QuotaStoreState {
   geminiCliQuota: Record<string, GeminiCliQuotaState>;
   kimiQuota: Record<string, KimiQuotaState>;
   githubQuota: Record<string, GitHubQuotaState>;
-  kiroQuota: Record<string, GenericOAuthQuotaState>;
+  kiroQuota: Record<string, KiroQuotaState>;
   qwenQuota: Record<string, GenericOAuthQuotaState>;
   clineQuota: Record<string, GenericOAuthQuotaState>;
   kilocodeQuota: Record<string, GenericOAuthQuotaState>;
@@ -20,7 +20,7 @@ interface QuotaStoreState {
   setGeminiCliQuota: (updater: QuotaUpdater<Record<string, GeminiCliQuotaState>>) => void;
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setGithubQuota: (updater: QuotaUpdater<Record<string, GitHubQuotaState>>) => void;
-  setKiroQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
+  setKiroQuota: (updater: QuotaUpdater<Record<string, KiroQuotaState>>) => void;
   setQwenQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
   setClineQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
   setKilocodeQuota: (updater: QuotaUpdater<Record<string, GenericOAuthQuotaState>>) => void;
