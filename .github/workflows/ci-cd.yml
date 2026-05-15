@@ -80,8 +80,8 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: ./bundle/index.html
-          target: /tmp/cli-proxy-management/
+          source: bundle/index.html
+          target: /tmp/cli-proxy-management
           strip_components: 1
 
       - name: Install bundle and reload container
@@ -92,14 +92,15 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
+            ls -la /tmp/cli-proxy-management/
             sudo install -m 644 -o root -g root \
               /tmp/cli-proxy-management/index.html \
               ${{ env.REMOTE_PATH }}
             rm -f /tmp/cli-proxy-management/index.html
             rmdir /tmp/cli-proxy-management 2>/dev/null || true
-            ls -lh ${{ env.REMOTE_PATH }}
+            sudo ls -lh ${{ env.REMOTE_PATH }}
 
             # No container restart required — the binary reads the static
-            # file from disk on every request. Touch it so the front-end
-            # cache buster (mtime header) flips.
+            # file from disk on every request. Touch it so any reverse-proxy
+            # mtime cache buster flips.
             sudo touch ${{ env.REMOTE_PATH }}
