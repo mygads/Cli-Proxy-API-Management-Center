@@ -74,4 +74,11 @@ export const oauthApi = {
     apiClient.post<{ status: string; label?: string; email?: string }>('/kiro-import-token', {
       refresh_token: refreshToken
     }),
+
+  // Kiro AWS Builder ID device-code flow. Replaces the legacy
+  // /kiro-auth-url which emits a Cognito PKCE URL that fails when opened
+  // in a browser. The new endpoint mirrors GitHub's device flow shape so
+  // the existing DEVICE_CODE_PROVIDERS rendering picks it up unchanged.
+  startKiroDeviceAuth: () =>
+    apiClient.get<OAuthStartResponse>('/kiro-device-auth'),
 };

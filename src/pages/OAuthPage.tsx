@@ -89,7 +89,7 @@ const PROVIDERS: { id: OAuthProvider; titleKey: string; hintKey: string; urlLabe
 ];
 
 const CALLBACK_SUPPORTED: OAuthProvider[] = ['codex', 'anthropic', 'antigravity', 'gemini-cli', 'kiro', 'qwen', 'cline', 'kilocode'];
-const DEVICE_CODE_PROVIDERS: OAuthProvider[] = ['github'];
+const DEVICE_CODE_PROVIDERS: OAuthProvider[] = ['github', 'kiro'];
 const SUCCESS_RESET_DELAY_MS = 5000;
 const getProviderI18nPrefix = (provider: OAuthProvider) => provider.replace('-', '_');
 const getAuthKey = (provider: OAuthProvider, suffix: string) =>
@@ -243,10 +243,17 @@ export function OAuthPage() {
       callbackUrl: ''
     });
     try {
-      const res = await oauthApi.startAuth(
-        provider,
-        provider === 'gemini-cli' ? { projectId: projectId || undefined } : undefined
-      );
+      // Kiro uses an AWS Builder ID device-code flow at a dedicated
+      // endpoint — the legacy /kiro-auth-url emits a Cognito PKCE URL
+      // that fails when opened in a browser. Other providers stay on
+      // the generic startAuth path.
+      const res =
+        provider === 'kiro'
+          ? await oauthApi.startKiroDeviceAuth()
+          : await oauthApi.startAuth(
+              provider,
+              provider === 'gemini-cli' ? { projectId: projectId || undefined } : undefined
+            );
       if (!res.state) {
         const message = t('auth_login.missing_state');
         updateProviderState(provider, {
