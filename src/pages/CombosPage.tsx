@@ -251,8 +251,15 @@ export function CombosPage() {
     setSaving(true);
     try {
       if (editingName) {
-        await combosApi.update(editingName, payload);
-        showNotification(t('combos.updated', { defaultValue: 'Combo updated' }), 'success');
+        const renamed = name !== editingName;
+        if (renamed) {
+          await combosApi.create(payload);
+          await combosApi.delete(editingName);
+          showNotification(t('combos.renamed', { defaultValue: 'Combo renamed' }), 'success');
+        } else {
+          await combosApi.update(editingName, payload);
+          showNotification(t('combos.updated', { defaultValue: 'Combo updated' }), 'success');
+        }
       } else {
         await combosApi.create(payload);
         showNotification(t('combos.created', { defaultValue: 'Combo created' }), 'success');
