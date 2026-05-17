@@ -212,6 +212,7 @@ export function VisualConfigEditor({
   const requestRetryError = getValidationMessage(t, validationErrors?.requestRetry);
   const maxRetryCredentialsError = getValidationMessage(t, validationErrors?.maxRetryCredentials);
   const maxRetryIntervalError = getValidationMessage(t, validationErrors?.maxRetryInterval);
+  const upstreamTimeoutError = getValidationMessage(t, validationErrors?.upstreamTimeoutSeconds);
   const keepaliveError = getValidationMessage(t, validationErrors?.['streaming.keepaliveSeconds']);
   const bootstrapRetriesError = getValidationMessage(
     t,
@@ -295,7 +296,7 @@ export function VisualConfigEditor({
         title: t('config_management.visual.sections.network.title'),
         description: t('config_management.visual.sections.network.description'),
         icon: IconTrendingUp,
-        errorCount: countErrors(['requestRetry', 'maxRetryCredentials', 'maxRetryInterval']),
+        errorCount: countErrors(['requestRetry', 'maxRetryCredentials', 'maxRetryInterval', 'upstreamTimeoutSeconds']),
       },
       {
         id: 'quota',
@@ -851,6 +852,15 @@ export function VisualConfigEditor({
                   onChange={(e) => onChange({ maxRetryInterval: e.target.value })}
                   disabled={disabled}
                   error={maxRetryIntervalError}
+                />
+                <Input
+                  label={t('config_management.visual.sections.network.upstream_timeout_seconds')}
+                  type="number"
+                  placeholder="300"
+                  value={values.upstreamTimeoutSeconds}
+                  onChange={(e) => onChange({ upstreamTimeoutSeconds: e.target.value })}
+                  disabled={disabled}
+                  error={upstreamTimeoutError}
                 />
                 <FieldShell
                   label={t('config_management.visual.sections.network.routing_strategy')}
