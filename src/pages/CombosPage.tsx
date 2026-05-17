@@ -219,8 +219,8 @@ export function CombosPage() {
       showNotification(t('combos.name_required', { defaultValue: 'Combo name is required' }), 'warning');
       return;
     }
-    if (!/^[a-zA-Z0-9_.\-\/]+$/.test(name)) {
-      showNotification(t('combos.name_invalid', { defaultValue: 'Name may only contain letters, digits, dashes, underscores, dots, and slashes' }), 'warning');
+    if (!/^[a-zA-Z0-9_.\-\/:]+$/.test(name)) {
+      showNotification(t('combos.name_invalid', { defaultValue: 'Name may only contain letters, digits, dashes, underscores, dots, slashes, and colons' }), 'warning');
       return;
     }
     if (form.entries.length === 0) {
@@ -374,11 +374,10 @@ export function CombosPage() {
           <input
             className={styles.formInput}
             value={form.name}
-            disabled={!!editingName}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            placeholder="genfity-smart"
+            placeholder="genfity/gpt-5.5:free"
           />
-          <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'Letters, digits, dashes, underscores, dots. Cannot be changed later.' })}</div>
+          <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'Letters, digits, dashes, underscores, dots, slashes, and colons.' })}</div>
         </div>
 
         <div className={styles.formGroup}>
