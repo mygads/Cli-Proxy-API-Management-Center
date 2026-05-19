@@ -10,6 +10,7 @@ export interface ComboEntry {
 export interface Combo {
   name: string;
   description?: string;
+  display_name?: string;
   status: 'active' | 'draft' | 'disabled';
   load_balance: boolean;
   strategy?: 'fallback' | 'round-robin' | 'auto';

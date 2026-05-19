@@ -16,6 +16,7 @@ const STATUSES = ['active', 'draft', 'disabled'] as const;
 const emptyCombo = (): Combo => ({
   name: '',
   description: '',
+  display_name: '',
   status: 'active',
   load_balance: false,
   entries: [],
@@ -336,7 +337,8 @@ export function CombosPage() {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>{t('combos.col_name', { defaultValue: 'Name' })}</th>
+                <th>{t('combos.col_name', { defaultValue: 'Model ID' })}</th>
+                <th>{t('combos.col_display_name', { defaultValue: 'Display Name' })}</th>
                 <th>{t('combos.col_description', { defaultValue: 'Description' })}</th>
                 <th>{t('combos.col_strategy', { defaultValue: 'Mode' })}</th>
                 <th>{t('combos.col_entries', { defaultValue: 'Entries' })}</th>
@@ -348,6 +350,7 @@ export function CombosPage() {
               {combos.map(c => (
                 <tr key={c.name}>
                   <td><strong>{c.name}</strong></td>
+                  <td>{c.display_name || '—'}</td>
                   <td>{c.description || '—'}</td>
                   <td><span className={`${styles.badge} ${lbBadgeClass(c.load_balance)}`}>{c.load_balance ? 'load balance' : 'fallback'}</span></td>
                   <td>{c.entries?.length ?? 0}</td>
@@ -377,14 +380,27 @@ export function CombosPage() {
         }
       >
         <div className={styles.formGroup}>
-          <label className={styles.formLabel}>{t('combos.field_name', { defaultValue: 'Name' })} *</label>
+          <label className={styles.formLabel}>{t('combos.field_name', { defaultValue: 'Model ID' })} *</label>
           <input
             className={styles.formInput}
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             placeholder="genfity/gpt-5.5:free"
           />
-          <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'Letters, digits, dashes, underscores, dots, slashes, and colons.' })}</div>
+          <div className={styles.formHint}>{t('combos.name_hint', { defaultValue: 'The model ID customers use to call this combo (e.g. "genfity/gpt-5.5:free"). Letters, digits, dashes, underscores, dots, slashes, and colons.' })}</div>
+        </div>
+
+        <div className={styles.formGroup}>
+          <label className={styles.formLabel}>{t('combos.field_display_name', { defaultValue: 'Display Name (Identity Rewrite)' })}</label>
+          <input
+            className={styles.formInput}
+            value={form.display_name ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))}
+            placeholder="GPT-5.5|OpenAI"
+          />
+          <div className={styles.formHint}>
+            {t('combos.display_name_hint', { defaultValue: 'Optional. Format: "ModelName|Vendor" (e.g. "GPT-5.5|OpenAI"). When set, identity questions like "what model are you?" are answered with this name instead of forwarding to upstream. Leave empty to disable identity rewrite (response stays pure from upstream).' })}
+          </div>
         </div>
 
         <div className={styles.formGroup}>
