@@ -49,6 +49,16 @@ export interface ProviderKeyConfig {
   authIndex?: string;
 }
 
+/**
+ * CommandCodeKeyConfig describes a stored Command Code (commandcode.ai)
+ * API key entry. Phase 1: storage only — backend persists entries via
+ * /v0/management/commandcode-api-key but no executor is wired yet.
+ *
+ * Shape mirrors ProviderKeyConfig (Codex/Claude) so existing edit UI and
+ * transformers can be reused without forking the form layout.
+ */
+export type CommandCodeKeyConfig = ProviderKeyConfig;
+
 export interface OpenAIProviderConfig {
   name: string;
   prefix?: string;

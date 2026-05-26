@@ -201,6 +201,26 @@ export const providersApi = {
   deleteClaudeConfig: (apiKey: string, baseUrl?: string) =>
     apiClient.delete(`/claude-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
 
+  // ─── Command Code (commandcode.ai) ─────────────────────────────────────────
+  // Phase 1: storage-only. Backend persists via /v0/management/commandcode-api-key
+  // but the runtime executor for commandcode is not wired yet. Saving/loading
+  // here is safe (round-trips through config.yaml); inference will route once
+  // Phase 2 lands the executor + translator.
+  async getCommandCodeConfigs(): Promise<ProviderKeyConfig[]> {
+    const data = await apiClient.get('/commandcode-api-key');
+    const list = extractArrayPayload(data, 'commandcode-api-key');
+    return list.map((item) => normalizeProviderKeyConfig(item)).filter(Boolean) as ProviderKeyConfig[];
+  },
+
+  saveCommandCodeConfigs: (configs: ProviderKeyConfig[]) =>
+    apiClient.put('/commandcode-api-key', configs.map((item) => serializeProviderKey(item))),
+
+  updateCommandCodeConfig: (index: number, value: ProviderKeyConfig) =>
+    apiClient.patch('/commandcode-api-key', { index, value: serializeProviderKey(value) }),
+
+  deleteCommandCodeConfig: (apiKey: string, baseUrl?: string) =>
+    apiClient.delete(`/commandcode-api-key${buildProviderDeleteQuery(apiKey, baseUrl)}`),
+
   async getVertexConfigs(): Promise<ProviderKeyConfig[]> {
     const data = await apiClient.get('/vertex-api-key');
     const list = extractArrayPayload(data, 'vertex-api-key');
