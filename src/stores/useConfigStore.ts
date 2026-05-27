@@ -50,6 +50,7 @@ const SECTION_KEYS: RawConfigSection[] = [
   'codex-api-key',
   'claude-api-key',
   'vertex-api-key',
+  'commandcode-api-key',
   'openai-compatibility',
   'oauth-excluded-models'
 ];
@@ -89,6 +90,8 @@ const extractSectionValue = (config: Config | null, section?: RawConfigSection) 
       return config.claudeApiKeys;
     case 'vertex-api-key':
       return config.vertexApiKeys;
+    case 'commandcode-api-key':
+      return config.commandcodeApiKeys;
     case 'openai-compatibility':
       return config.openaiCompatibility;
     case 'oauth-excluded-models':
@@ -234,6 +237,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
           break;
         case 'vertex-api-key':
           nextConfig.vertexApiKeys = value as Config['vertexApiKeys'];
+          break;
+        case 'commandcode-api-key':
+          nextConfig.commandcodeApiKeys = value as Config['commandcodeApiKeys'];
           break;
         case 'openai-compatibility':
           nextConfig.openaiCompatibility = value as Config['openaiCompatibility'];

@@ -5,6 +5,7 @@ import {
   AmpcodeSection,
   ClaudeSection,
   CodexSection,
+  CommandCodeSection,
   GeminiSection,
   OpenAISection,
   VertexSection,
@@ -51,6 +52,9 @@ export function AiProvidersPage() {
   const [vertexConfigs, setVertexConfigs] = useState<ProviderKeyConfig[]>(
     () => config?.vertexApiKeys || []
   );
+  const [commandcodeConfigs, setCommandcodeConfigs] = useState<ProviderKeyConfig[]>(
+    () => config?.commandcodeApiKeys || []
+  );
   const [openaiProviders, setOpenaiProviders] = useState<OpenAIProviderConfig[]>(
     () => config?.openaiCompatibility || []
   );
@@ -96,6 +100,7 @@ export function AiProvidersPage() {
       setCodexConfigs(data?.codexApiKeys || []);
       setClaudeConfigs(data?.claudeApiKeys || []);
       setVertexConfigs(data?.vertexApiKeys || []);
+      setCommandcodeConfigs(data?.commandcodeApiKeys || []);
       setOpenaiProviders(data?.openaiCompatibility || []);
 
       if (vertexResult.status === 'fulfilled') {
@@ -138,12 +143,14 @@ export function AiProvidersPage() {
     if (config?.codexApiKeys) setCodexConfigs(config.codexApiKeys);
     if (config?.claudeApiKeys) setClaudeConfigs(config.claudeApiKeys);
     if (config?.vertexApiKeys) setVertexConfigs(config.vertexApiKeys);
+    if (config?.commandcodeApiKeys) setCommandcodeConfigs(config.commandcodeApiKeys);
     if (config?.openaiCompatibility) setOpenaiProviders(config.openaiCompatibility);
   }, [
     config?.geminiApiKeys,
     config?.codexApiKeys,
     config?.claudeApiKeys,
     config?.vertexApiKeys,
+    config?.commandcodeApiKeys,
     config?.openaiCompatibility,
   ]);
 
@@ -185,7 +192,7 @@ export function AiProvidersPage() {
   };
 
   const setConfigEnabled = async (
-    provider: 'gemini' | 'codex' | 'claude' | 'vertex',
+    provider: 'gemini' | 'codex' | 'claude' | 'vertex' | 'commandcode',
     index: number,
     enabled: boolean
   ) => {
@@ -230,7 +237,9 @@ export function AiProvidersPage() {
         ? codexConfigs
         : provider === 'claude'
           ? claudeConfigs
-          : vertexConfigs;
+          : provider === 'commandcode'
+            ? commandcodeConfigs
+            : vertexConfigs;
     const current = source[index];
     if (!current) return;
 
@@ -252,6 +261,10 @@ export function AiProvidersPage() {
       setClaudeConfigs(nextList);
       updateConfigValue('claude-api-key', nextList);
       clearCache('claude-api-key');
+    } else if (provider === 'commandcode') {
+      setCommandcodeConfigs(nextList);
+      updateConfigValue('commandcode-api-key', nextList);
+      clearCache('commandcode-api-key');
     } else {
       setVertexConfigs(nextList);
       updateConfigValue('vertex-api-key', nextList);
@@ -263,6 +276,8 @@ export function AiProvidersPage() {
         await providersApi.saveCodexConfigs(nextList);
       } else if (provider === 'claude') {
         await providersApi.saveClaudeConfigs(nextList);
+      } else if (provider === 'commandcode') {
+        await providersApi.saveCommandCodeConfigs(nextList);
       } else {
         await providersApi.saveVertexConfigs(nextList);
       }
@@ -280,6 +295,10 @@ export function AiProvidersPage() {
         setClaudeConfigs(previousList);
         updateConfigValue('claude-api-key', previousList);
         clearCache('claude-api-key');
+      } else if (provider === 'commandcode') {
+        setCommandcodeConfigs(previousList);
+        updateConfigValue('commandcode-api-key', previousList);
+        clearCache('commandcode-api-key');
       } else {
         setVertexConfigs(previousList);
         updateConfigValue('vertex-api-key', previousList);
@@ -323,13 +342,24 @@ export function AiProvidersPage() {
     }
   };
 
-  const deleteProviderEntry = async (type: 'codex' | 'claude', index: number) => {
-    const source = type === 'codex' ? codexConfigs : claudeConfigs;
+  const deleteProviderEntry = async (
+    type: 'codex' | 'claude' | 'commandcode',
+    index: number
+  ) => {
+    const source =
+      type === 'codex' ? codexConfigs : type === 'claude' ? claudeConfigs : commandcodeConfigs;
     const entry = source[index];
     if (!entry) return;
+    const titleDefaults: Record<typeof type, string> = {
+      codex: 'Delete Codex Config',
+      claude: 'Delete Claude Config',
+      commandcode: 'Delete Command Code Config',
+    };
     showConfirmation({
-      title: t(`ai_providers.${type}_delete_title`, { defaultValue: `Delete ${type === 'codex' ? 'Codex' : 'Claude'} Config` }),
-      message: t(`ai_providers.${type}_delete_confirm`),
+      title: t(`ai_providers.${type}_delete_title`, { defaultValue: titleDefaults[type] }),
+      message: t(`ai_providers.${type}_delete_confirm`, {
+        defaultValue: `Are you sure you want to delete this ${type} configuration?`,
+      }),
       variant: 'danger',
       confirmText: t('common.confirm'),
       onConfirm: async () => {
@@ -341,13 +371,25 @@ export function AiProvidersPage() {
             updateConfigValue('codex-api-key', next);
             clearCache('codex-api-key');
             showNotification(t('notification.codex_config_deleted'), 'success');
-          } else {
+          } else if (type === 'claude') {
             await providersApi.deleteClaudeConfig(entry.apiKey, entry.baseUrl);
             const next = claudeConfigs.filter((_, idx) => idx !== index);
             setClaudeConfigs(next);
             updateConfigValue('claude-api-key', next);
             clearCache('claude-api-key');
             showNotification(t('notification.claude_config_deleted'), 'success');
+          } else {
+            await providersApi.deleteCommandCodeConfig(entry.apiKey, entry.baseUrl);
+            const next = commandcodeConfigs.filter((_, idx) => idx !== index);
+            setCommandcodeConfigs(next);
+            updateConfigValue('commandcode-api-key', next);
+            clearCache('commandcode-api-key');
+            showNotification(
+              t('notification.commandcode_config_deleted', {
+                defaultValue: 'Command Code config deleted',
+              }),
+              'success'
+            );
           }
         } catch (err: unknown) {
           const message = getErrorMessage(err);
@@ -464,6 +506,20 @@ export function AiProvidersPage() {
             onEdit={(index) => openEditor(`/ai-providers/vertex/${index}`)}
             onDelete={deleteVertex}
             onToggle={(index, enabled) => void setConfigEnabled('vertex', index, enabled)}
+          />
+        </div>
+
+        <div id="provider-commandcode">
+          <CommandCodeSection
+            configs={commandcodeConfigs}
+            usageByProvider={usageByProvider}
+            loading={loading}
+            disableControls={disableControls}
+            isSwitching={isSwitching}
+            onAdd={() => openEditor('/ai-providers/commandcode/new')}
+            onEdit={(index) => openEditor(`/ai-providers/commandcode/${index}`)}
+            onDelete={(index) => void deleteProviderEntry('commandcode', index)}
+            onToggle={(index, enabled) => void setConfigEnabled('commandcode', index, enabled)}
           />
         </div>
 
