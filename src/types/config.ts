@@ -29,6 +29,12 @@ export interface Config {
   codexApiKeys?: ProviderKeyConfig[];
   claudeApiKeys?: ProviderKeyConfig[];
   vertexApiKeys?: ProviderKeyConfig[];
+  /**
+   * commandcodeApiKeys stores Command Code (commandcode.ai) API keys.
+   * Phase 1: storage only — backend persists these but the runtime does
+   * not yet route requests to commandcode.
+   */
+  commandcodeApiKeys?: ProviderKeyConfig[];
   openaiCompatibility?: OpenAIProviderConfig[];
   oauthExcludedModels?: Record<string, string[]>;
   raw?: Record<string, unknown>;
@@ -51,6 +57,7 @@ export type RawConfigSection =
   | 'codex-api-key'
   | 'claude-api-key'
   | 'vertex-api-key'
+  | 'commandcode-api-key'
   | 'openai-compatibility'
   | 'oauth-excluded-models';
 

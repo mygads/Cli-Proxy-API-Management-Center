@@ -453,6 +453,14 @@ export const normalizeConfigResponse = (raw: unknown): Config => {
       .filter(Boolean) as ProviderKeyConfig[];
   }
 
+  const commandcodeList =
+    raw['commandcode-api-key'] ?? raw.commandcodeApiKey ?? raw.commandcodeApiKeys;
+  if (Array.isArray(commandcodeList)) {
+    config.commandcodeApiKeys = commandcodeList
+      .map((item) => normalizeProviderKeyConfig(item))
+      .filter(Boolean) as ProviderKeyConfig[];
+  }
+
   const openaiList = raw['openai-compatibility'] ?? raw.openaiCompatibility ?? raw.openAICompatibility;
   if (Array.isArray(openaiList)) {
     config.openaiCompatibility = openaiList
