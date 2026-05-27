@@ -4,11 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { ModelInputList } from '@/components/ui/ModelInputList';
 import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { SecondaryScreenShell } from '@/components/common/SecondaryScreenShell';
-import { providersApi } from '@/services/api';
+import { apiCallApi, getApiCallErrorMessage, providersApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
 import { headersToEntries } from '@/utils/headers';
@@ -20,9 +21,27 @@ import layoutStyles from './AiProvidersEditLayout.module.scss';
 import styles from './AiProvidersPage.module.scss';
 
 type LocationState = { fromAiProviders?: boolean } | null;
+type CatalogEntry = { id: string; name: string };
+type TestStatus = 'idle' | 'loading' | 'success' | 'error';
 
 const COMMANDCODE_DEFAULT_BASE_URL = 'https://api.commandcode.ai/alpha/generate';
 const COMMANDCODE_DEFAULT_PREFIX = 'cmc';
+const COMMANDCODE_TEST_TIMEOUT_MS = 30_000;
+const COMMANDCODE_CLI_VERSION = '0.25.7';
+
+const COMMANDCODE_BUILTIN_CATALOG: CatalogEntry[] = [
+  { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+  { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+  { id: 'moonshotai/Kimi-K2.6', name: 'Kimi K2.6' },
+  { id: 'moonshotai/Kimi-K2.5', name: 'Kimi K2.5' },
+  { id: 'zai-org/GLM-5.1', name: 'GLM 5.1' },
+  { id: 'zai-org/GLM-5', name: 'GLM 5' },
+  { id: 'MiniMaxAI/MiniMax-M2.7', name: 'MiniMax M2.7' },
+  { id: 'MiniMaxAI/MiniMax-M2.5', name: 'MiniMax M2.5' },
+  { id: 'Qwen/Qwen3.6-Max-Preview', name: 'Qwen 3.6 Max Preview' },
+  { id: 'Qwen/Qwen3.6-Plus', name: 'Qwen 3.6 Plus' },
+  { id: 'stepfun/Step-3.5-Flash', name: 'Step 3.5 Flash' },
+];
 
 const buildEmptyForm = (): ProviderFormState => ({
   apiKey: '',
@@ -56,6 +75,14 @@ const normalizeModelEntries = (entries: Array<{ name: string; alias: string }>) 
     return acc;
   }, []);
 
+const slugifyAlias = (id: string) => {
+  const tail = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+  return tail
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
 type CommandCodeFormBaseline = {
   apiKey: string;
   priority: number | null;
@@ -72,6 +99,23 @@ const buildCommandCodeBaseline = (form: ProviderFormState): CommandCodeFormBasel
   models: normalizeModelEntries(form.modelEntries),
   excludedModels: parseExcludedModels(form.excludedText ?? ''),
 });
+
+const getErrorMessage = (err: unknown) => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return '';
+};
+
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 export function AiProvidersCommandCodeEditPage() {
   const { t } = useTranslation();
@@ -93,6 +137,12 @@ export function AiProvidersCommandCodeEditPage() {
   const [error, setError] = useState('');
   const [form, setForm] = useState<ProviderFormState>(() => buildEmptyForm());
   const [baseline, setBaseline] = useState(() => buildCommandCodeBaseline(buildEmptyForm()));
+  const [catalog, setCatalog] = useState<CatalogEntry[]>(COMMANDCODE_BUILTIN_CATALOG);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+  const [catalogPick, setCatalogPick] = useState('');
+  const [testModel, setTestModel] = useState('');
+  const [testStatus, setTestStatus] = useState<TestStatus>('idle');
+  const [testMessage, setTestMessage] = useState('');
 
   const hasIndexParam = typeof params.index === 'string';
   const editIndex = useMemo(() => parseIndexParam(params.index), [params.index]);
@@ -225,6 +275,214 @@ export function AiProvidersCommandCodeEditPage() {
 
   const canSave = !disableControls && !saving && !loading && !invalidIndexParam && !invalidIndex;
 
+  const availableModelOptions = useMemo(() => {
+    return normalizedModels.map((entry) => {
+      const value = entry.alias?.trim() || entry.name;
+      const label = entry.alias?.trim() ? `${entry.alias} (${entry.name})` : entry.name;
+      return { value, label };
+    });
+  }, [normalizedModels]);
+
+  useEffect(() => {
+    if (!availableModelOptions.length) {
+      if (testModel !== '') setTestModel('');
+      return;
+    }
+    if (!availableModelOptions.some((opt) => opt.value === testModel)) {
+      setTestModel(availableModelOptions[0].value);
+    }
+  }, [availableModelOptions, testModel]);
+
+  const catalogOptions = useMemo(() => {
+    const existing = new Set(
+      normalizedModels
+        .map((m) => m.name.toLowerCase())
+        .filter((s) => s.length > 0)
+    );
+    return catalog
+      .filter((entry) => !existing.has(entry.id.toLowerCase()))
+      .map((entry) => ({ value: entry.id, label: `${entry.name} (${entry.id})` }));
+  }, [catalog, normalizedModels]);
+
+  const handlePickFromCatalog = useCallback(
+    (modelId: string) => {
+      if (!modelId) return;
+      const found = catalog.find((entry) => entry.id === modelId);
+      if (!found) return;
+      const alias = slugifyAlias(found.id);
+      setForm((prev) => {
+        const merged = prev.modelEntries.filter((entry) => entry.name?.trim() || entry.alias?.trim());
+        const exists = merged.some((entry) => entry.name.trim().toLowerCase() === found.id.toLowerCase());
+        if (exists) return prev;
+        return {
+          ...prev,
+          modelEntries: [...merged, { name: found.id, alias }],
+        };
+      });
+      setCatalogPick('');
+    },
+    [catalog]
+  );
+
+  const handleRefreshCatalog = useCallback(async () => {
+    if (catalogRefreshing) return;
+    setCatalogRefreshing(true);
+    try {
+      const apiKey = form.apiKey.trim();
+      const headers: Record<string, string> = {
+        'x-command-code-version': COMMANDCODE_CLI_VERSION,
+        'x-cli-environment': 'cli',
+      };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const result = await apiCallApi.request(
+        {
+          method: 'GET',
+          url: 'https://api.commandcode.ai/v1/models',
+          header: headers,
+        },
+        { timeout: 15_000 }
+      );
+      if (result.statusCode >= 200 && result.statusCode < 300) {
+        const body = result.body as { data?: Array<{ id?: string; name?: string }> } | undefined;
+        const list = Array.isArray(body?.data) ? body!.data : [];
+        const normalized = list
+          .map((m) => ({
+            id: String(m?.id ?? '').trim(),
+            name: String(m?.name ?? m?.id ?? '').trim(),
+          }))
+          .filter((m) => m.id);
+        if (normalized.length > 0) {
+          setCatalog(normalized);
+          showNotification(t('ai_providers.commandcode_catalog_refresh_success'), 'success');
+          return;
+        }
+      }
+      setCatalog(COMMANDCODE_BUILTIN_CATALOG);
+      showNotification(t('ai_providers.commandcode_catalog_refresh_fallback'), 'info');
+    } catch (err: unknown) {
+      setCatalog(COMMANDCODE_BUILTIN_CATALOG);
+      const message = getErrorMessage(err);
+      showNotification(
+        `${t('ai_providers.commandcode_catalog_refresh_fallback')}${message ? ` (${message})` : ''}`,
+        'info'
+      );
+    } finally {
+      setCatalogRefreshing(false);
+    }
+  }, [catalogRefreshing, form.apiKey, showNotification, t]);
+
+  const runCommandCodeTest = useCallback(async () => {
+    if (testStatus === 'loading') return;
+
+    const alias = testModel.trim();
+    if (!alias) {
+      const message = t('ai_providers.commandcode_test_model_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+    const entry = normalizedModels.find(
+      (m) => (m.alias?.trim() || m.name) === alias
+    );
+    if (!entry) {
+      const message = t('ai_providers.commandcode_test_model_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+    const upstreamModel = entry.name.trim();
+    if (!upstreamModel) {
+      const message = t('ai_providers.commandcode_test_model_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    const apiKey = form.apiKey.trim();
+    if (!apiKey) {
+      const message = t('notification.commandcode_api_key_required');
+      setTestStatus('error');
+      setTestMessage(message);
+      showNotification(message, 'error');
+      return;
+    }
+
+    setTestStatus('loading');
+    setTestMessage(t('ai_providers.commandcode_test_running'));
+
+    try {
+      const result = await apiCallApi.request(
+        {
+          method: 'POST',
+          url: COMMANDCODE_DEFAULT_BASE_URL,
+          header: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+            'x-command-code-version': COMMANDCODE_CLI_VERSION,
+            'x-cli-environment': 'cli',
+            'x-session-id': generateUUID(),
+            Accept: 'text/event-stream',
+          },
+          data: JSON.stringify({
+            threadId: generateUUID(),
+            memory: '',
+            config: {
+              workingDir: '/tmp',
+              date: new Date().toISOString().slice(0, 10),
+              environment: 'web',
+              structure: [],
+              isGitRepo: false,
+              currentBranch: '',
+              mainBranch: '',
+              gitStatus: '',
+              recentCommits: [],
+            },
+            params: {
+              model: upstreamModel,
+              messages: [
+                {
+                  role: 'user',
+                  content: [{ type: 'text', text: 'Reply with just OK' }],
+                },
+              ],
+              stream: true,
+              max_tokens: 16,
+              temperature: 0,
+            },
+          }),
+        },
+        { timeout: COMMANDCODE_TEST_TIMEOUT_MS }
+      );
+
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        throw new Error(getApiCallErrorMessage(result));
+      }
+
+      const message = t('ai_providers.commandcode_test_success');
+      setTestStatus('success');
+      setTestMessage(message);
+      showNotification(message, 'success');
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      const errorCode =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      const isTimeout = errorCode === 'ECONNABORTED' || message.toLowerCase().includes('timeout');
+      const resolvedMessage = isTimeout
+        ? t('ai_providers.commandcode_test_timeout', {
+            seconds: COMMANDCODE_TEST_TIMEOUT_MS / 1000,
+          })
+        : `${t('ai_providers.commandcode_test_failed')}: ${message || t('common.unknown_error')}`;
+      setTestStatus('error');
+      setTestMessage(resolvedMessage);
+      showNotification(resolvedMessage, 'error');
+    }
+  }, [form.apiKey, normalizedModels, showNotification, t, testModel, testStatus]);
+
   const handleSave = useCallback(async () => {
     if (!canSave) return;
 
@@ -286,6 +544,8 @@ export function AiProvidersCommandCodeEditPage() {
     updateConfigValue,
   ]);
 
+  const isTesting = testStatus === 'loading';
+
   return (
     <SecondaryScreenShell
       ref={swipeRef}
@@ -331,7 +591,7 @@ export function AiProvidersCommandCodeEditPage() {
               placeholder={t('ai_providers.commandcode_add_modal_key_placeholder')}
               value={form.apiKey}
               onChange={(e) => setForm((prev) => ({ ...prev, apiKey: e.target.value }))}
-              disabled={disableControls || saving}
+              disabled={disableControls || saving || isTesting}
             />
             <Input
               label={t('ai_providers.priority_label')}
@@ -347,7 +607,7 @@ export function AiProvidersCommandCodeEditPage() {
                   priority: parsed !== undefined && Number.isFinite(parsed) ? parsed : undefined,
                 }));
               }}
-              disabled={disableControls || saving}
+              disabled={disableControls || saving || isTesting}
             />
             <Input
               label={t('ai_providers.prefix_label')}
@@ -355,7 +615,7 @@ export function AiProvidersCommandCodeEditPage() {
               value={form.prefix ?? ''}
               onChange={(e) => setForm((prev) => ({ ...prev, prefix: e.target.value }))}
               hint={t('ai_providers.prefix_hint')}
-              disabled={disableControls || saving}
+              disabled={disableControls || saving || isTesting}
             />
 
             <div className={styles.modelConfigSection}>
@@ -373,7 +633,7 @@ export function AiProvidersCommandCodeEditPage() {
                         modelEntries: [...prev.modelEntries, { name: '', alias: '' }],
                       }))
                     }
-                    disabled={disableControls || saving}
+                    disabled={disableControls || saving || isTesting}
                   >
                     {t('ai_providers.commandcode_models_add_btn')}
                   </Button>
@@ -381,12 +641,42 @@ export function AiProvidersCommandCodeEditPage() {
               </div>
               <div className={styles.sectionHint}>{t('ai_providers.commandcode_models_hint')}</div>
 
+              <div className={styles.modelTestControls}>
+                <Select
+                  value={catalogPick}
+                  options={catalogOptions}
+                  onChange={(value) => {
+                    setCatalogPick(value);
+                    handlePickFromCatalog(value);
+                  }}
+                  placeholder={
+                    catalogOptions.length
+                      ? t('ai_providers.commandcode_catalog_pick_placeholder')
+                      : t('ai_providers.commandcode_catalog_pick_empty')
+                  }
+                  className={styles.openaiTestSelect}
+                  ariaLabel={t('ai_providers.commandcode_catalog_pick_label')}
+                  disabled={
+                    disableControls || saving || isTesting || catalogOptions.length === 0
+                  }
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleRefreshCatalog()}
+                  loading={catalogRefreshing}
+                  disabled={disableControls || saving || isTesting}
+                >
+                  {t('ai_providers.commandcode_catalog_refresh')}
+                </Button>
+              </div>
+
               <ModelInputList
                 entries={form.modelEntries}
                 onChange={(entries) => setForm((prev) => ({ ...prev, modelEntries: entries }))}
                 namePlaceholder={t('common.model_name_placeholder')}
                 aliasPlaceholder={t('common.model_alias_placeholder')}
-                disabled={disableControls || saving}
+                disabled={disableControls || saving || isTesting}
                 hideAddButton
                 className={styles.modelInputList}
                 rowClassName={styles.modelInputRow}
@@ -395,6 +685,70 @@ export function AiProvidersCommandCodeEditPage() {
                 removeButtonTitle={t('common.delete')}
                 removeButtonAriaLabel={t('common.delete')}
               />
+
+              <div className={styles.modelTestPanel}>
+                <div className={styles.modelTestMeta}>
+                  <label className={styles.modelTestLabel}>
+                    {t('ai_providers.commandcode_test_title')}
+                  </label>
+                  <span className={styles.modelTestHint}>
+                    {t('ai_providers.commandcode_test_hint')}
+                  </span>
+                </div>
+                <div className={styles.modelTestControls}>
+                  <Select
+                    value={testModel}
+                    options={availableModelOptions}
+                    onChange={(value) => {
+                      setTestModel(value);
+                      setTestStatus('idle');
+                      setTestMessage('');
+                    }}
+                    placeholder={
+                      availableModelOptions.length
+                        ? t('ai_providers.commandcode_test_select_placeholder')
+                        : t('ai_providers.commandcode_test_select_empty')
+                    }
+                    className={styles.openaiTestSelect}
+                    ariaLabel={t('ai_providers.commandcode_test_title')}
+                    disabled={
+                      saving ||
+                      disableControls ||
+                      isTesting ||
+                      availableModelOptions.length === 0
+                    }
+                  />
+                  <Button
+                    variant={testStatus === 'error' ? 'danger' : 'secondary'}
+                    size="sm"
+                    onClick={() => void runCommandCodeTest()}
+                    loading={testStatus === 'loading'}
+                    disabled={
+                      saving ||
+                      disableControls ||
+                      isTesting ||
+                      availableModelOptions.length === 0
+                    }
+                    className={styles.modelTestAllButton}
+                  >
+                    {t('ai_providers.commandcode_test_action')}
+                  </Button>
+                </div>
+              </div>
+
+              {testMessage && (
+                <div
+                  className={`status-badge ${
+                    testStatus === 'error'
+                      ? 'error'
+                      : testStatus === 'success'
+                        ? 'success'
+                        : 'muted'
+                  }`}
+                >
+                  {testMessage}
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label>{t('ai_providers.excluded_models_label')}</label>
@@ -404,7 +758,7 @@ export function AiProvidersCommandCodeEditPage() {
                 value={form.excludedText}
                 onChange={(e) => setForm((prev) => ({ ...prev, excludedText: e.target.value }))}
                 rows={4}
-                disabled={disableControls || saving}
+                disabled={disableControls || saving || isTesting}
               />
               <div className="hint">{t('ai_providers.excluded_models_hint')}</div>
             </div>
