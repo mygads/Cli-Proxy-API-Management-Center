@@ -1343,6 +1343,7 @@
     "commandcode_config_updated": "Конфигурация Command Code успешно обновлена",
     "commandcode_config_deleted": "Конфигурация Command Code успешно удалена",
     "commandcode_base_url_required": "Введите базовый URL Command Code или оставьте поле пустым для значения по умолчанию",
+    "commandcode_api_key_required": "Введите API-ключ Command Code",
     "prefix_required": "Префикс обязателен",
     "claude_config_added": "Конфигурация Claude успешно добавлена",
     "claude_config_updated": "Конфигурация Claude успешно обновлена",

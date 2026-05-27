@@ -1439,6 +1439,7 @@
     "commandcode_config_updated": "Command Code configuration updated successfully",
     "commandcode_config_deleted": "Command Code configuration deleted successfully",
     "commandcode_base_url_required": "Please enter the Command Code Base URL or leave it empty for the default",
+    "commandcode_api_key_required": "Please enter the Command Code API key",
     "prefix_required": "Prefix is required",
     "claude_config_added": "Claude configuration added successfully",
     "claude_config_updated": "Claude configuration updated successfully",

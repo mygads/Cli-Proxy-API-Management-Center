@@ -1409,6 +1409,7 @@
     "commandcode_config_updated": "Command Code 配置更新成功",
     "commandcode_config_deleted": "Command Code 配置删除成功",
     "commandcode_base_url_required": "请填写 Command Code Base URL，或留空使用默认值",
+    "commandcode_api_key_required": "请填写 Command Code API 密钥",
     "prefix_required": "前缀为必填项",
     "claude_config_added": "Claude配置添加成功",
     "claude_config_updated": "Claude配置更新成功",

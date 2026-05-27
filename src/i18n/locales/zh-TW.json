@@ -1372,6 +1372,7 @@
     "commandcode_config_updated": "Command Code 設定更新成功",
     "commandcode_config_deleted": "Command Code 設定刪除成功",
     "commandcode_base_url_required": "請填寫 Command Code Base URL，或留空使用預設值",
+    "commandcode_api_key_required": "請填寫 Command Code API 金鑰",
     "prefix_required": "前綴為必填項",
     "claude_config_added": "Claude 設定新增成功",
     "claude_config_updated": "Claude 設定更新成功",
