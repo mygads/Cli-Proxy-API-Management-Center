@@ -50,9 +50,10 @@ function ModelPicker({ open, models, existingSelections, loading, onClose, onPic
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (!open) setSearch('');
-  }, [open]);
+  const handleClose = useCallback(() => {
+    setSearch('');
+    onClose();
+  }, [onClose]);
 
   const groups = useMemo(() => {
     const map = new Map<string, ModelInfo[]>();
@@ -72,9 +73,9 @@ function ModelPicker({ open, models, existingSelections, loading, onClose, onPic
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={t('combos.picker_title', { defaultValue: 'Select Model' })}
-      footer={<Button variant="secondary" onClick={onClose}>{t('common.close', { defaultValue: 'Close' })}</Button>}
+      footer={<Button variant="secondary" onClick={handleClose}>{t('common.close', { defaultValue: 'Close' })}</Button>}
     >
       <input
         className={styles.formInput}
@@ -220,7 +221,7 @@ export function CombosPage() {
       showNotification(t('combos.name_required', { defaultValue: 'Combo name is required' }), 'warning');
       return;
     }
-    if (!/^[a-zA-Z0-9_.\-\/:]+$/.test(name)) {
+      if (!/^[a-zA-Z0-9_.-/:]+$/.test(name)) {
       showNotification(t('combos.name_invalid', { defaultValue: 'Name may only contain letters, digits, dashes, underscores, dots, slashes, and colons' }), 'warning');
       return;
     }
