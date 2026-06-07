@@ -221,7 +221,7 @@ export function CombosPage() {
       showNotification(t('combos.name_required', { defaultValue: 'Combo name is required' }), 'warning');
       return;
     }
-      if (!/^[a-zA-Z0-9_.-/:]+$/.test(name)) {
+      if (!/^[a-zA-Z0-9_./:-]+$/.test(name)) {
       showNotification(t('combos.name_invalid', { defaultValue: 'Name may only contain letters, digits, dashes, underscores, dots, slashes, and colons' }), 'warning');
       return;
     }
