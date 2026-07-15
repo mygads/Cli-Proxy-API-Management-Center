@@ -93,19 +93,21 @@ jobs:
           script: |
             set -e
             ls -la /tmp/cli-proxy-management/
-            # install(1) does NOT create the target's parent directory, so if
-            # <...>/static/ is ever missing the copy fails with "No such file
-            # or directory" (observed 2026-07-15). Ensure the parent exists
-            # first, then install with -D as a belt-and-suspenders.
-            sudo mkdir -p "$(dirname "${{ env.REMOTE_PATH }}")"
-            sudo install -D -m 644 -o root -g root \
-              /tmp/cli-proxy-management/index.html \
-              ${{ env.REMOTE_PATH }}
+            # The deploy user (VPS_USER) owns the entire target tree under its
+            # own home, so NO sudo is used here. sudo is locked down to
+            # nginx/docker/psql on this host and would fail with
+            # "sudo: I'm afraid I can't do that" (observed 2026-07-15).
+            # rm -f first: the previous file may be root:root from a manual
+            # deploy; owning the parent dir lets us unlink it regardless.
+            DEST="${{ env.REMOTE_PATH }}"
+            mkdir -p "$(dirname "$DEST")"
+            rm -f "$DEST"
+            install -D -m 644 /tmp/cli-proxy-management/index.html "$DEST"
             rm -f /tmp/cli-proxy-management/index.html
             rmdir /tmp/cli-proxy-management 2>/dev/null || true
-            sudo ls -lh ${{ env.REMOTE_PATH }}
+            ls -lh "$DEST"
 
             # No container restart required — the binary reads the static
             # file from disk on every request. Touch it so any reverse-proxy
             # mtime cache buster flips.
-            sudo touch ${{ env.REMOTE_PATH }}
+            touch "$DEST"
