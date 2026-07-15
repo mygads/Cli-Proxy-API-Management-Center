@@ -10,6 +10,7 @@ export * from './authFiles';
 export * from './oauth';
 export * from './quota';
 export * from './combos';
+export * from './imageRouting';
 export * from './health';
 export * from './logs';
 export * from './version';

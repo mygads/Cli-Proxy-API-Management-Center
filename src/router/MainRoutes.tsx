@@ -17,6 +17,7 @@ import { AuthFilesOAuthExcludedEditPage } from '@/pages/AuthFilesOAuthExcludedEd
 import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAliasEditPage';
 import { OAuthPage } from '@/pages/OAuthPage';
 import { CombosPage } from '@/pages/CombosPage';
+import { ImageRoutingPage } from '@/pages/ImageRoutingPage';
 import { HealthPage } from '@/pages/HealthPage';
 import { QuotaPage } from '@/pages/QuotaPage';
 import { ConfigPage } from '@/pages/ConfigPage';
@@ -76,6 +77,7 @@ const mainRoutes = [
   { path: '/auth-files/oauth-model-alias', element: <AuthFilesOAuthModelAliasEditPage /> },
   { path: '/oauth', element: <OAuthPage /> },
   { path: '/combos', element: <CombosPage /> },
+  { path: '/image-routing', element: <ImageRoutingPage /> },
   { path: '/health', element: <HealthPage /> },
   { path: '/quota', element: <QuotaPage /> },
   { path: '/config', element: <ConfigPage /> },

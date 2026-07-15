@@ -43,6 +43,7 @@ const sidebarIcons: Record<string, ReactNode> = {
   authFiles: <IconSidebarAuthFiles size={18} />,
   oauth: <IconSidebarOauth size={18} />,
   combos: <IconSidebarCombos size={18} />,
+  imageRouting: <IconSidebarCombos size={18} />,
   health: <IconSidebarHealth size={18} />,
   quota: <IconSidebarQuota size={18} />,
   config: <IconSidebarConfig size={18} />,
@@ -395,6 +396,7 @@ export function MainLayout() {
     { path: '/auth-files', label: t('nav.auth_files'), icon: sidebarIcons.authFiles },
     { path: '/oauth', label: t('nav.oauth', { defaultValue: 'OAuth' }), icon: sidebarIcons.oauth },
     { path: '/combos', label: t('nav.combos', { defaultValue: 'Combos' }), icon: sidebarIcons.combos },
+    { path: '/image-routing', label: t('nav.image_routing', { defaultValue: 'Image Routing' }), icon: sidebarIcons.imageRouting },
     { path: '/health', label: t('nav.health', { defaultValue: 'Health' }), icon: sidebarIcons.health },
     { path: '/quota', label: t('nav.quota_management'), icon: sidebarIcons.quota },
     ...(config?.loggingToFile
