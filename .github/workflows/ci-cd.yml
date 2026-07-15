@@ -93,7 +93,12 @@ jobs:
           script: |
             set -e
             ls -la /tmp/cli-proxy-management/
-            sudo install -m 644 -o root -g root \
+            # install(1) does NOT create the target's parent directory, so if
+            # <...>/static/ is ever missing the copy fails with "No such file
+            # or directory" (observed 2026-07-15). Ensure the parent exists
+            # first, then install with -D as a belt-and-suspenders.
+            sudo mkdir -p "$(dirname "${{ env.REMOTE_PATH }}")"
+            sudo install -D -m 644 -o root -g root \
               /tmp/cli-proxy-management/index.html \
               ${{ env.REMOTE_PATH }}
             rm -f /tmp/cli-proxy-management/index.html
