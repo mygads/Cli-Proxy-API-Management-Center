@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
-import { useNotificationStore } from '@/stores';
+import { ModelPicker } from '@/components/ui/ModelPicker';
+import { useAuthStore, useConfigStore, useModelsStore, useNotificationStore } from '@/stores';
+import { apiKeysApi } from '@/services/api/apiKeys';
 import { combosApi, type Combo } from '@/services/api/combos';
 import {
   imageRoutingApi,
@@ -22,11 +24,45 @@ const emptyConfig = (): ImageRoutingConfig => ({
 export function ImageRoutingPage() {
   const { t } = useTranslation();
   const { showNotification } = useNotificationStore();
+  const auth = useAuthStore();
+  const appConfig = useConfigStore((s) => s.config);
+  const models = useModelsStore((s) => s.models);
+  const modelsLoading = useModelsStore((s) => s.loading);
+  const fetchModelsFromStore = useModelsStore((s) => s.fetchModels);
 
   const [config, setConfig] = useState<ImageRoutingConfig>(emptyConfig());
   const [combos, setCombos] = useState<Combo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pickerFor, setPickerFor] = useState<number | null>(null);
+
+  const ensureModelsLoaded = useCallback(async () => {
+    if (models.length > 0) return;
+    if (auth.connectionStatus !== 'connected' || !auth.apiBase) return;
+    try {
+      const configKeys = Array.isArray(appConfig?.apiKeys) ? (appConfig!.apiKeys as unknown as string[]) : [];
+      let primaryKey = configKeys[0];
+      if (!primaryKey) {
+        try {
+          const list = await apiKeysApi.list();
+          if (Array.isArray(list) && list.length > 0) {
+            const first = list[0] as unknown;
+            if (typeof first === 'string') primaryKey = first;
+            else if (first && typeof first === 'object') {
+              const rec = first as Record<string, unknown>;
+              primaryKey = String(rec['api-key'] ?? rec.apiKey ?? rec.key ?? rec.Key ?? '');
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      await fetchModelsFromStore(auth.apiBase, primaryKey || undefined);
+    } catch (e: unknown) {
+      showNotification(
+        e instanceof Error ? e.message : t('image_routing.models_load_error', { defaultValue: 'Failed to load model list' }),
+        'warning',
+      );
+    }
+  }, [models.length, auth.connectionStatus, auth.apiBase, appConfig, fetchModelsFromStore, showNotification, t]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +89,7 @@ export function ImageRoutingPage() {
   }, [showNotification, t]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void ensureModelsLoaded(); }, [ensureModelsLoaded]);
 
   const toggleRoutedCombo = (name: string) => {
     setConfig((prev) => {
@@ -214,6 +251,7 @@ export function ImageRoutingPage() {
                   onChange={(ev) => updateChainModel(idx, ev.target.value)}
                 />
                 <div className={styles.chainActions}>
+                  <button type="button" onClick={() => { setPickerFor(idx); void ensureModelsLoaded(); }} aria-label="select" title={t('image_routing.select_model', { defaultValue: 'Select from available models' })}>⋯</button>
                   <button type="button" onClick={() => moveChainEntry(idx, -1)} disabled={idx === 0} aria-label="up">↑</button>
                   <button type="button" onClick={() => moveChainEntry(idx, 1)} disabled={idx === config.chain.length - 1} aria-label="down">↓</button>
                   <button type="button" onClick={() => removeChainEntry(idx)} aria-label="remove">✕</button>
@@ -226,6 +264,18 @@ export function ImageRoutingPage() {
           <div className={styles.note}>{t('image_routing.chain_full', { defaultValue: 'Maximum of 6 entries (1 target + 5 fallback).' })}</div>
         )}
       </Card>
+
+      <ModelPicker
+        open={pickerFor !== null}
+        models={models}
+        existingSelections={config.chain.map((e) => e.model)}
+        loading={modelsLoading}
+        onClose={() => setPickerFor(null)}
+        onPick={(m) => {
+          if (pickerFor !== null) updateChainModel(pickerFor, m);
+          setPickerFor(null);
+        }}
+      />
     </div>
   );
 }
